@@ -30,3 +30,7 @@ config.toml
 # OS / editor
 .DS_Store
 *.swp
+
+# Stealth browser profiles: fingerprints and burner session cookies.
+# Never commit these — they are session credentials.
+profiles/

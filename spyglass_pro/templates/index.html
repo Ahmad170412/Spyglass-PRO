@@ -43,7 +43,7 @@
       <li class="nav-item" data-panel="email"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg></span>Email</li>
       <li class="nav-item" data-panel="username"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>Username</li>
       <li class="nav-item" data-panel="phone"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>Phone Number</li>
-      <li class="nav-item" data-panel="instagram"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></span>Instagram</li>
+      <li class="nav-item" data-panel="instagram"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>Social Recon</li>
       <li class="nav-item" data-panel="darkweb"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>Dark Web</li>
 
       <li class="nav-group">Infrastructure</li>
@@ -149,36 +149,43 @@
       <div id="phoneResults" class="results-area"></div>
     </section>
 
-    <!-- Instagram Panel -->
+    <!-- Social Panel (registry-driven) -->
     <section class="panel" id="panel-instagram">
-      <h2>Instagram</h2>
-      <p class="panel-desc">Stealth Instagram recon through a humanized browser. Profile, posts, contacts, social graph. Basic runs work logged-out; enable the optional burner login for advanced social-graph recon.</p>
-      <form class="module-form" id="form-instagram" data-api="instacloak" data-target="instaUsername" data-results="instaResults">
+      <h2>Social Recon</h2>
+      <p class="panel-desc">Stealth profile recon through a humanized browser, across every registered platform. Profile, posts, contacts, social graph. Basic runs work logged-out; enable the optional burner login for advanced social-graph recon.</p>
+      <form class="module-form" id="form-social" data-api="social" data-target="socialHandle" data-results="socialResults">
         <div class="form-row">
-          <label for="instaUsername">Instagram Username</label>
-          <input type="text" id="instaUsername" placeholder="instagram" />
+          <label for="socialPlatform">Platform</label>
+          <select id="socialPlatform">
+            <option value="">Loading platforms…</option>
+          </select>
+          <p class="panel-hint" id="socialCaps"></p>
+        </div>
+        <div class="form-row">
+          <label for="socialHandle">Username</label>
+          <input type="text" id="socialHandle" placeholder="instagram" />
         </div>
         <div class="form-row">
           <label>Options</label>
           <div class="checkbox-row">
             <label><input type="checkbox" data-flag="headless" checked /> Headless</label>
-            <label><input type="checkbox" data-flag="deep" /> Deep (HD propic + highlights)</label>
+            <label><input type="checkbox" data-flag="deep" /> Deep (stories, HD propic)</label>
             <label><input type="checkbox" data-flag="media" checked /> Download Media</label>
-            <label><input type="checkbox" data-flag="followers" checked /> Attempt Followers</label>
             <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+            <label><input type="checkbox" data-flag="report" /> Markdown Report</label>
           </div>
         </div>
         <div class="form-row burner-row">
           <label>Burner Account (optional)</label>
           <div class="checkbox-row">
-            <label><input type="checkbox" id="burnerEnabled" /> Use burner login — unlocks follower/following lists + stories</label>
+            <label><input type="checkbox" id="burnerEnabled" /> Use burner login — unlocks lists + posts where the platform allows it</label>
           </div>
           <input type="text" id="burnerUser" placeholder="burner username" autocomplete="off" />
           <input type="password" id="burnerPass" placeholder="burner password" autocomplete="new-password" />
         </div>
-        <button type="submit" class="btn btn-primary run-btn">Run Instagram Recon</button>
+        <button type="submit" class="btn btn-primary run-btn">Run Social Recon</button>
       </form>
-      <div id="instaResults" class="results-area"></div>
+      <div id="socialResults" class="results-area"></div>
     </section>
 
     <!-- Dark Web Panel -->

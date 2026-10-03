@@ -662,6 +662,81 @@ def _investigate_summary(inputs, result):
     return f"{base} — {detail}" if detail else base
 
 
+# ─── Multi-platform social (spyglass_pro.social) ─────────────
+
+def social_platforms():
+    """Platforms the social harness can collect, for the UI."""
+    try:
+        from spyglass_pro.social import registry
+        return registry.describe()
+    except Exception as exc:
+        return {"error": _safe_error(exc)}
+
+
+def run_social(platform, handle, payload):
+    """Collect one profile through the shared social harness.
+
+    Shares the job pool with everything else, and — like InstaCloak — is
+    serialized, because the harness drives one stealth browser session and
+    InstaCloak's UI hooks are patched process-wide.
+    """
+    payload = payload or {}
+    platform = (platform or "").strip().lower()
+    handle = (handle or "").strip().lstrip("@")
+    progress = Progress()
+
+    try:
+        from spyglass_pro.social import harness, registry
+        from spyglass_pro.social import report as social_report
+    except ImportError as exc:
+        return {"error": f"social harness unavailable: {_safe_error(exc)}"}
+
+    if registry.get(platform) is None:
+        return {"error": f"unknown platform: {platform}"}
+    if not handle:
+        return {"error": "handle required"}
+
+    options = {
+        "headless": bool(payload.get("headless")),
+        "deep": bool(payload.get("deep")),
+        "media": bool(payload.get("media")),
+        "proxy_url": _env_proxy(),
+    }
+    if payload.get("burner_enabled"):
+        options["burner_username"] = (payload.get("burner_username") or "").strip()
+        options["burner_password"] = payload.get("burner_password") or ""
+
+    progress.add(f"starting {platform} collection for @{handle}")
+    with _SOCIAL_LOCK:
+        result = harness.collect(platform, handle, options)
+
+    progress.add(social_report.summary(result))
+    response = dict(result)
+    response["progress"] = progress.lines
+    response["summary"] = social_report.summary(result)
+
+    if not result.get("error"):
+        try:
+            from instacloak.session import safe_dir_name
+            base = f"{platform}_{safe_dir_name(handle)}"
+            if payload.get("report"):
+                _add_artifact(response, social_report.write(
+                    result, "output", f"{base}.md"), "report")
+            if payload.get("json"):
+                from spyglass_osint import export as sg_export
+                _add_artifact(response, sg_export.json_output(
+                    result, handle, f"social_{platform}"), "json")
+        except Exception as exc:
+            response["artifact_error"] = _safe_error(exc)
+    return response
+
+
+# InstaCloak's progress hooks are patched process-wide, and the social
+# harness drives a single stealth browser session, so these runs are
+# serialized the same way InstaCloak's are.
+_SOCIAL_LOCK = threading.Lock()
+
+
 # ─── Case history (both tools' SQLite stores) ──────────────────
 
 def list_cases(limit=200):

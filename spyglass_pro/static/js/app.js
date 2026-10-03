@@ -192,8 +192,15 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
 
-      if (api === 'instacloak') {
-        var payload = { username: target };
+      if (api === 'social') {
+        var platform = (document.getElementById('socialPlatform') || {}).value || '';
+        if (!platform) {
+          setLoading(btn, false);
+          clearScan(resultsId);
+          showToast('Pick a platform first', 'error');
+          return;
+        }
+        var payload = { platform: platform, handle: target };
         Object.keys(flags).forEach(function (k) { payload[k] = flags[k]; });
         var burnerOn = document.getElementById('burnerEnabled');
         var burnerUser = document.getElementById('burnerUser');
@@ -207,13 +214,13 @@ document.addEventListener('DOMContentLoaded', function () {
           showToast('Burner login needs a username and password', 'error');
           return;
         }
-        apiFetch('/api/instacloak/run', {
+        apiFetch('/api/social/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         })
           .then(function (r) { return r.json(); })
-          .then(function (data) { setLoading(btn, false); displayResults(resultsId, data, false, 'instagram'); })
+          .then(function (data) { setLoading(btn, false); displayResults(resultsId, data, false, 'social'); })
           .catch(function (err) { setLoading(btn, false); clearScan(resultsId); showToast('Error: ' + err.message, 'error'); });
         return;
       }
@@ -299,8 +306,9 @@ document.addEventListener('DOMContentLoaded', function () {
     if (btn) btn.addEventListener('click', function () { casesQuery(pair[1]); });
   });
 
-  /* ── Load cases ── */
+  /* ── Load cases + platform registry ── */
   loadCases();
+  loadSocialPlatforms();
 });
 
 /* ── API Helpers ── */
@@ -494,38 +502,203 @@ function displayResults(containerId, data, append, qtype) {
 }
 
 /* ── Structured result rendering ── */
+/* ── Render registry ──
+   Each result type declares how to recognise and render itself, so adding
+   a result type is one entry here instead of another branch in a chain
+   that every new type has to be threaded through. `matches` is checked in
+   order; the first hit wins. Order matters only where two shapes could
+   both match, so keep the specific ones above the generic ones. */
+var RENDERERS = [
+  { name: 'social',     matches: function (d) { return d.platform !== undefined && d.handle !== undefined; },
+    render: renderSocial },
+  { name: 'instacloak', matches: function (d) { return d.tool === 'InstaCloak' || d.profile_status !== undefined; },
+    render: renderInstacloak },
+  { name: 'investigate', matches: function (d, q) { return q === 'investigate' || d.entities !== undefined; },
+    render: renderInvestigate },
+  { name: 'lens',       matches: function (d) { return d.resolved_ip !== undefined || d.input_type !== undefined; },
+    render: renderLens },
+  { name: 'opsec',      matches: function (d) { return d.direct !== undefined && d.recommendations !== undefined; },
+    render: renderOpsec },
+  { name: 'phone',      matches: function (d) { return d.phonenumbers !== undefined; },
+    render: renderPhone },
+  { name: 'website',    matches: function (d) { return d.subdomains !== undefined; },
+    render: renderWebsite },
+  { name: 'darkweb',    matches: function (d) { return d.ahmia !== undefined; },
+    render: renderDarkweb },
+  { name: 'username',   matches: function (d) { return d.all_4 !== undefined; },
+    render: renderUsername },
+  { name: 'email',      matches: function (d) { return d.user_scanner_only !== undefined; },
+    render: renderEmail },
+  { name: 'ip',         matches: function (d) { return Array.isArray(d.open_ports); },
+    render: renderSpyglassIp }
+];
+
 function renderBody(data, qtype) {
-  if (data.tool === 'InstaCloak' || data.profile_status !== undefined) {
-    return renderInstacloak(data);
-  }
-  if (qtype === 'investigate' || data.entities !== undefined) {
-    return renderInvestigate(data);
-  }
-  if (data.resolved_ip !== undefined || data.input_type !== undefined) {
-    return renderLens(data);
-  }
-  if (data.direct !== undefined && data.recommendations !== undefined) {
-    return renderOpsec(data);
-  }
-  if (data.phonenumbers !== undefined) {
-    return renderPhone(data);
-  }
-  if (data.subdomains !== undefined) {
-    return renderWebsite(data);
-  }
-  if (data.ahmia !== undefined) {
-    return renderDarkweb(data);
-  }
-  if (data.all_4 !== undefined) {
-    return renderUsername(data);
-  }
-  if (data.user_scanner_only !== undefined) {
-    return renderEmail(data);
-  }
-  if (Array.isArray(data.open_ports)) {
-    return renderSpyglassIp(data);
+  for (var i = 0; i < RENDERERS.length; i++) {
+    var entry = RENDERERS[i];
+    if (entry.matches(data, qtype)) return entry.render(data, qtype);
   }
   return renderGeneric(data);
+}
+
+/* ── Social (registry-driven, one layout for every platform) ── */
+var SOCIAL_FIELDS = [
+  { key: 'display_name', label: 'Name', type: 'text' },
+  { key: 'bio', label: 'Bio', type: 'text' },
+  { key: 'url', label: 'Profile URL', type: 'link' },
+  { key: 'follower_count', label: 'Followers', type: 'count' },
+  { key: 'following_count', label: 'Following', type: 'count' },
+  { key: 'post_count', label: 'Posts', type: 'count' },
+  { key: 'verified', label: 'Verified', type: 'bool' },
+  { key: 'private', label: 'Private', type: 'bool' },
+  { key: 'joined', label: 'Joined', type: 'text' },
+  { key: 'location', label: 'Location', type: 'text' },
+  { key: 'website', label: 'Website', type: 'link' },
+  { key: 'avatar_url', label: 'Avatar', type: 'image' },
+  { key: 'external_links', label: 'External Links', type: 'list' }
+];
+
+function socialCell(field, value) {
+  if (field.type === 'count' && typeof value === 'number') {
+    return value.toLocaleString();
+  }
+  if (field.type === 'bool') {
+    return value ? 'yes' : 'no';
+  }
+  if (field.type === 'list') {
+    return value.map(function (item) {
+      var href = safeHref(item);
+      return href ? '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener">' +
+                    escapeHtml(item) + '</a>' : escapeHtml(item);
+    }).join(', ');
+  }
+  if (field.type === 'link' || field.type === 'image') {
+    var link = safeHref(value);
+    return link ? '<a href="' + escapeHtml(link) + '" target="_blank" rel="noopener">' +
+                  escapeHtml(value) + '</a>' : escapeHtml(value);
+  }
+  return escapeHtml(value);
+}
+
+function renderSocial(d) {
+  var html = '';
+  var label = (d.platform || 'social').toUpperCase();
+
+  html += '<h3>' + escapeHtml(label) + ' — @' + escapeHtml(d.handle || '') + '</h3>';
+
+  if (d.error) {
+    html += '<p class="res-line">Error: <span class="status-err">' +
+            escapeHtml(d.error) + '</span></p>';
+  }
+  html += renderStatusLine('Session', d.logged_in ? 'burner logged in' : 'logged out', !!d.logged_in);
+  html += renderStatusLine('Source', d.source || 'n/a', !!d.source);
+
+  if (d.avatar_url && safeHref(d.avatar_url)) {
+    html += '<p class="res-line"><img class="social-avatar" src="' +
+            escapeHtml(safeHref(d.avatar_url)) + '" alt="" /></p>';
+  }
+
+  /* Fields the platform can never return are omitted, not shown as empty,
+     so a blank cell always means "this run did not retrieve it". */
+  var rows = '';
+  SOCIAL_FIELDS.forEach(function (field) {
+    var value = d[field.key];
+    if (value === null || value === undefined || value === '' ||
+        (Array.isArray(value) && !value.length) ||
+        (field.type === 'bool' && !value)) {
+      return;
+    }
+    rows += '<tr><td class="dim">' + escapeHtml(field.label) + '</td><td>' +
+            socialCell(field, value) + '</td></tr>';
+  });
+  if (rows) {
+    html += '<table class="res-table"><tbody>' + rows + '</tbody></table>';
+  } else if (!d.error) {
+    html += '<p class="dim">No profile fields retrieved.</p>';
+  }
+
+  if (d.posts && d.posts.length) {
+    html += '<h4>Posts (' + d.posts.length + ')</h4><ul class="post-list">';
+    d.posts.slice(0, 12).forEach(function (post) {
+      var href = safeHref(post.url || '');
+      var caption = escapeHtml(post.caption || '(no caption)');
+      var meta = [];
+      if (post.likes !== undefined && post.likes !== null) meta.push(post.likes + ' likes');
+      if (post.comments !== undefined && post.comments !== null) meta.push(post.comments + ' comments');
+      html += '<li>' + (href ? '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener">' +
+                          caption + '</a>' : caption);
+      if (meta.length) html += ' <span class="dim">(' + escapeHtml(meta.join(' · ')) + ')</span>';
+      html += '</li>';
+    });
+    html += '</ul>';
+  }
+
+  /* Walls are the honest counterpart of an empty list. */
+  var walls = d.walls || {};
+  var wallKeys = Object.keys(walls);
+  if (wallKeys.length) {
+    html += '<h4>Not retrieved</h4>';
+    wallKeys.forEach(function (kind) {
+      html += renderStatusLine(walls[kind].label || kind, walls[kind].why || 'unavailable', false);
+    });
+  }
+
+  if (d.metrics && Object.keys(d.metrics).length) {
+    html += '<h4>Collected</h4>';
+    Object.keys(d.metrics).sort().forEach(function (name) {
+      html += renderStatusLine(name.replace(/_/g, ' '), d.metrics[name], true);
+    });
+  }
+
+  if (d.notes && d.notes.length) {
+    html += '<h4>Notes</h4>';
+    d.notes.forEach(function (note) { html += '<p class="res-line">' + escapeHtml(note) + '</p>'; });
+  }
+  return html;
+}
+
+/* ── Platform list (registry-driven) ── */
+function loadSocialPlatforms() {
+  var sel = document.getElementById('socialPlatform');
+  var caps = document.getElementById('socialCaps');
+  if (!sel) return;
+  apiFetch('/api/social/platforms')
+    .then(function (r) { return r.json(); })
+    .then(function (list) {
+      if (!Array.isArray(list) || !list.length) {
+        sel.innerHTML = '<option value="">no platforms available</option>';
+        return;
+      }
+      sel.innerHTML = list.map(function (p) {
+        return '<option value="' + escapeHtml(p.key) + '">' + escapeHtml(p.label) + '</option>';
+      }).join('');
+      updateSocialCaps(list);
+    })
+    .catch(function () {
+      sel.innerHTML = '<option value="">could not load platforms</option>';
+    });
+
+  sel.addEventListener('change', function () { updateSocialCaps(null); });
+}
+
+function updateSocialCaps(platforms) {
+  var caps = document.getElementById('socialCaps');
+  var sel = document.getElementById('socialPlatform');
+  if (!caps || !sel) return;
+  if (!platforms) {
+    return apiFetch('/api/social/platforms').then(function (r) { return r.json(); })
+      .then(function (list) { showCaps(list, sel.value); });
+  }
+  showCaps(platforms, sel.value);
+}
+
+function showCaps(platforms, key) {
+  var caps = document.getElementById('socialCaps');
+  if (!caps) return;
+  var match = (platforms || []).filter(function (p) { return p.key === key; })[0];
+  if (!match) { caps.textContent = ''; return; }
+  caps.textContent = 'Can return: ' + match.capabilities.join(', ') +
+    (match.login === 'none' ? ' · no burner login' : ' · burner login supported');
 }
 
 function renderSection(title, inner) {

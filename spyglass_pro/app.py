@@ -207,6 +207,25 @@ def api_investigate_run():
     return jsonify(runner.run_job(runner.run_investigate, data))
 
 
+@app.route("/api/social/platforms")
+def api_social_platforms():
+    """Platforms the social harness can collect, with their capabilities."""
+    return jsonify(runner.social_platforms())
+
+
+@app.route("/api/social/run", methods=["POST"])
+def api_social_run():
+    """Collect one profile through the shared social harness."""
+    data = request.get_json(silent=True) or {}
+    platform = (data.get("platform") or "").strip()
+    handle = (data.get("handle") or "").strip()
+    if not platform:
+        return jsonify({"error": "platform required"})
+    if not handle:
+        return jsonify({"error": "handle required"})
+    return jsonify(runner.run_social(platform, handle, data))
+
+
 @app.route("/api/cases")
 def api_cases():
     """Stored cases from both tools' case stores."""

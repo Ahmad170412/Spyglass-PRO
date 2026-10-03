@@ -154,6 +154,31 @@ body {
   color: var(--fg);
 }
 
+/* Social panel: capability hint under the platform select. */
+.panel-hint {
+  max-width: 420px;
+  margin: 8px auto 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+  text-align: center;
+}
+
+.social-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.post-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 /* ── Layout ── */
 .layout {
   display: flex;
