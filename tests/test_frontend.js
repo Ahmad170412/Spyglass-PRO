@@ -1,11 +1,11 @@
-/* Tests for the Cases panel's render functions.
+/* Tests for the dashboard's pure render functions.
  *
- * These are the pure string builders behind the Stored Cases panel, and
- * they are where a misleading empty state hides: "no runs for this target"
- * and "no runs *because a filter is narrowing the search*" rendered
- * identically, which made a working timeline look broken.
+ * These are the string builders behind the results panels, and they are
+ * where misleading output hides: "no runs for this target" and "no runs
+ * *because a filter is narrowing the search*" rendered identically, which
+ * made a working timeline look broken.
  *
- * Run: node tests/test_cases_ui.js
+ * Run: node tests/test_frontend.js
  */
 
 'use strict';

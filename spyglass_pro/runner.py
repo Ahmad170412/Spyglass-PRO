@@ -1,20 +1,25 @@
-"""Background run engine — wires the dashboard to the sibling tools.
+"""Background run engine — wires the dashboard to the recon engines.
 
 Spyglass-Pro ships Spyglass-OSINT, InstaCloak and Lens-Extender as
-plain packages under ``modules/``. This module puts that directory on
-``sys.path`` and exposes one runner per tool plus a small job pool:
+plain packages under ``modules/``, and its own social harness in
+``social/``. This module puts the vendored directory on ``sys.path`` and
+exposes one runner per engine plus a small job pool:
 
 * each API endpoint submits its runner with :func:`run_job` and blocks
   on the future, so the existing fetch-then-render frontend contract
   stays unchanged (the pool bounds how many heavy scans run at once);
-* runners collect progress lines from the tools' terminal UIs
-  (InstaCloak hooks) or log callbacks (Lens) and return them as
-  ``progress`` in the result JSON, next to a one-line ``summary``;
+* runners collect progress lines from the engines' own terminal UIs or
+  log callbacks and return them as ``progress`` in the result JSON, next
+  to a one-line ``summary``;
 * unexpected failures come back as ``{"error": ...}`` so the dashboard
   always renders JSON.
 
-The tools are imported lazily inside the runners: the dashboard must
-start (and every other module must keep working) even when a tool's
+Browser-driven work is *not* dispatched from here: ``social.harness``
+owns the stealth session and serializes it, so a platform scan and an
+investigation's Instagram leg share one code path and one lock.
+
+The engines are imported lazily inside the runners: the dashboard must
+start (and every other module must keep working) even when an engine's
 optional dependencies (phonenumbers, httpx, cloakbrowser) are missing.
 """
 
@@ -333,146 +338,6 @@ def _spyglass_summary(qtype, target, result):
     return f"{base} — {detail}" if detail else base
 
 
-# ─── InstaCloak ────────────────────────────────────────────────
-
-def _patch_instacloak_ui(progress):
-    """Redirect every loaded instacloak module's UI helpers to progress.
-
-    The modules bind ``say``/``say_parts``/``section`` into their own
-    namespaces at import time (``from .ui import say``), so each module's
-    binding has to be patched individually — patching ``instacloak.ui``
-    alone would not reach call sites.
-    """
-
-    def say(msg, *styles, **kwargs):
-        progress.add(msg)
-
-    def say_parts(*parts, **kwargs):
-        text = "".join(
-            str(part[0]) if isinstance(part, tuple) else str(part)
-            for part in parts
-        )
-        progress.add(text)
-
-    def section(n, total, msg, **kwargs):
-        progress.add(f"[{n}/{total}] {msg}")
-
-    hooks = {"say": say, "say_parts": say_parts, "section": section}
-    saved = []
-    for name, mod in list(sys.modules.items()):
-        if name == "instacloak" or name.startswith("instacloak."):
-            for attr, hook in hooks.items():
-                if getattr(mod, attr, None) is not None:
-                    saved.append((mod, attr, getattr(mod, attr)))
-                    setattr(mod, attr, hook)
-    return saved
-
-
-def _restore_instacloak_ui(saved):
-    for mod, attr, original in saved:
-        setattr(mod, attr, original)
-
-
-# InstaCloak drives a real browser and patches the UI hooks of every
-# loaded instacloak module process-wide (sys.modules attributes), so
-# concurrent runs would cross their progress lines. One run at a time;
-# other jobs (spyglass/lens) keep the pool's remaining workers.
-_INSTACLOAK_LOCK = threading.Lock()
-
-
-def run_instacloak(username, payload):
-    """Run one InstaCloak profile collection."""
-    payload = payload or {}
-    username = (username or "").strip()
-    if not username:
-        return {"error": "username required"}
-    progress = Progress()
-
-    try:
-        from instacloak import config as ic_config
-        from instacloak import engine as ic_engine
-    except ImportError as exc:
-        return {"error": f"InstaCloak unavailable: {exc}"}
-
-    with _INSTACLOAK_LOCK:
-        return _run_instacloak(username, payload, ic_config, ic_engine, progress)
-
-
-def _run_instacloak(username, payload, ic_config, ic_engine, progress):
-    cfg = ic_config.load_config(None)
-    # The form's checkboxes reflect the operator's current intent —
-    # apply them directly over whatever config.toml says.
-    cfg["headless"] = bool(payload.get("headless"))
-    cfg["deep"] = bool(payload.get("deep"))
-    cfg["download_media"] = bool(payload.get("media"))
-    cfg["attempt_followers"] = bool(payload.get("followers"))
-
-    # Burner login: credentials from the form win over config.toml.
-    if payload.get("burner_enabled"):
-        cfg["login_enabled"] = True
-        cfg["login_username"] = ((payload.get("burner_username") or "").strip()
-                                 or cfg["login_username"])
-        cfg["login_password"] = (payload.get("burner_password")
-                                 or cfg["login_password"])
-
-    # Route the browser through the dashboard proxy when one is set.
-    proxy = _env_proxy()
-    if proxy:
-        cfg["proxy_enabled"] = True
-        cfg["proxy_url"] = proxy
-
-    saved = _patch_instacloak_ui(progress)
-    try:
-        progress.add(f"starting instacloak collection for @{username}")
-        report = ic_engine.collect(cfg, username)
-    except SystemExit as exc:
-        # open_session() exits when cloakbrowser is missing.
-        return {
-            "error": "InstaCloak could not launch a browser session "
-                     f"(exit {exc.code}). Install cloakbrowser: pip install cloakbrowser"
-        }
-    except ImportError as exc:
-        return {"error": f"InstaCloak dependency missing: {exc}"}
-    except Exception as exc:
-        return {"error": f"InstaCloak run failed: {_safe_error(exc)}"}
-    finally:
-        _restore_instacloak_ui(saved)
-
-    response = dict(report) if isinstance(report, dict) else {"report": report}
-    response["report_dir"] = str(ic_engine.output_dir(cfg, username))
-    if payload.get("store"):
-        # InstaCloak has no store of its own — the encrypted Spyglass
-        # case store takes the report snapshot (qtype "instacloak").
-        try:
-            from spyglass_osint import store as sg_store
-            run_id = sg_store.store_result(report, "instacloak", username)
-            if run_id:
-                response["stored_run_id"] = run_id
-        except Exception:
-            pass
-    response["progress"] = progress.lines
-    response["summary"] = _instacloak_summary(report, username)
-    return response
-
-
-def _instacloak_summary(report, username):
-    if not isinstance(report, dict):
-        return f"InstaCloak scan of @{username} complete"
-    parts = []
-    status = report.get("profile_status")
-    if status and status != "ok":
-        parts.append(f"profile: {status}")
-    counts = (report.get("profile") or {}).get("counts") or {}
-    for key, label in (("followers", "followers"), ("following", "following"),
-                       ("posts", "posts")):
-        value = counts.get(key)
-        if value is not None:
-            parts.append(f"{value} {label}")
-    detail = ", ".join(parts)
-    base = f"InstaCloak scan of @{username} complete"
-    return f"{base} — {detail}" if detail else base
-
-
 # ─── Lens-Extender ─────────────────────────────────────────────
 
 def run_lens(target, flags):
@@ -607,14 +472,14 @@ def run_investigate(payload):
     except Exception as exc:
         return {"error": f"investigation failed: {_safe_error(exc)}"}
 
-    # Optional cross-tool legs: passive IP recon via Lens, Instagram
-    # profiling via InstaCloak. Each runner brings its own progress.
+    # Optional cross-tool legs: passive IP recon via Lens, and a social
+    # profile through the shared harness. Each leg brings its own progress.
     ip_target = (payload.get("ip") or "").strip()
     if ip_target:
         result["ip_recon"] = run_lens(ip_target, {"passive": "1"})
     insta_target = (payload.get("insta") or "").strip()
     if insta_target:
-        result["instacloak"] = run_instacloak(insta_target, {})
+        result["social"] = run_social("instagram", insta_target, {}, progress=progress)
 
     result["progress"] = progress.lines
     result["summary"] = _investigate_summary(inputs, result)
@@ -673,17 +538,17 @@ def social_platforms():
         return {"error": _safe_error(exc)}
 
 
-def run_social(platform, handle, payload):
+def run_social(platform, handle, payload, progress=None):
     """Collect one profile through the shared social harness.
 
-    Shares the job pool with everything else, and — like InstaCloak — is
-    serialized, because the harness drives one stealth browser session and
-    InstaCloak's UI hooks are patched process-wide.
+    The harness owns the browser session and its serialization lock, so this
+    is only option marshalling and artifact writing.
     """
     payload = payload or {}
     platform = (platform or "").strip().lower()
     handle = (handle or "").strip().lstrip("@")
-    progress = Progress()
+    own_progress = progress is None
+    progress = progress if progress is not None else Progress()
 
     try:
         from spyglass_pro.social import harness, registry
@@ -707,12 +572,11 @@ def run_social(platform, handle, payload):
         options["burner_password"] = payload.get("burner_password") or ""
 
     progress.add(f"starting {platform} collection for @{handle}")
-    with _SOCIAL_LOCK:
-        result = harness.collect(platform, handle, options)
+    result = harness.collect(platform, handle, options, progress=progress)
 
     progress.add(social_report.summary(result))
     response = dict(result)
-    response["progress"] = progress.lines
+    response["progress"] = progress.lines if own_progress else []
     response["summary"] = social_report.summary(result)
 
     if not result.get("error"):
@@ -729,12 +593,6 @@ def run_social(platform, handle, payload):
         except Exception as exc:
             response["artifact_error"] = _safe_error(exc)
     return response
-
-
-# InstaCloak's progress hooks are patched process-wide, and the social
-# harness drives a single stealth browser session, so these runs are
-# serialized the same way InstaCloak's are.
-_SOCIAL_LOCK = threading.Lock()
 
 
 # ─── Case history (both tools' SQLite stores) ──────────────────

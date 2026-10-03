@@ -1,23 +1,27 @@
 """In-page HTTP for social adapters.
 
-InstaCloak's ``fetch.fetch_text`` sends an implicit **GET** — it was only
-ever used against Instagram's GET-only endpoints, and adding a method
-parameter there would fork the vendored copy from upstream. This module
-keeps the same principle (requests execute *inside* the stealth browser, so
-they carry its TLS fingerprint and cookies) while supporting the verbs
-other platforms need.
+Every request executes *inside* the stealth browser, so it carries that
+browser's TLS fingerprint and cookies rather than looking like a scraper.
 
-Anything that changes how a request leaves the machine belongs here, not in
-``spyglass_pro/modules/``.
+Two transports, tried in order:
+
+1. in-page ``fetch`` — shares the session exactly, but is subject to CORS,
+   so the page must already be on the target origin;
+2. Playwright's ``page.request`` — not CORS-bound and shares cookies, used
+   as the fallback when the in-page call fails.
+
+InstaCloak's ``fetch.py`` only ever issued implicit **GET** requests (fine
+for its GET-only endpoints, fatal for X's POST guest-token call). Rather
+than fork that vendored copy, the verbs live here.
+
+Anything that changes how a request leaves the machine belongs in this
+module, not in ``spyglass_pro/modules/``.
 """
 
 from __future__ import annotations
 
 import json as _json
 
-# One in-page fetch implementation for every verb. `credentials: include`
-# sends the session's cookies; the AbortController keeps a hung request
-# from pinning a browser worker for the whole job timeout.
 _JS = """async (arg) => {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), arg.timeout_ms);
@@ -37,9 +41,11 @@ _JS = """async (arg) => {
 }"""
 
 DEFAULT_TIMEOUT_MS = 30000
+# Playwright's timeout is in seconds.
+_FALLBACK_TIMEOUT_S = DEFAULT_TIMEOUT_MS / 1000
 
 
-def _request(page, url, headers=None, method="GET", timeout_ms=DEFAULT_TIMEOUT_MS):
+def _in_page(page, url, headers, method, timeout_ms):
     try:
         result = page.evaluate(_JS, {
             "url": url,
@@ -49,25 +55,51 @@ def _request(page, url, headers=None, method="GET", timeout_ms=DEFAULT_TIMEOUT_M
         })
     except Exception:
         return None
-    if not isinstance(result, dict):
-        return None
-    status = result.get("status") or 0
-    if 200 <= status < 300:
-        return result.get("text")
+    if isinstance(result, dict):
+        status = result.get("status") or 0
+        if 200 <= status < 300:
+            return result.get("text")
     return None
 
 
+def _via_request_api(page, url, headers, method, timeout_ms):
+    """Fallback transport: same cookies, no CORS, but not same-origin TLS."""
+    try:
+        request = getattr(page, "request", None)
+        if request is None:
+            return None
+        response = request.fetch(
+            url, method=method, headers=headers or {},
+            timeout=_FALLBACK_TIMEOUT_S,
+        )
+        if response.ok:
+            return response.text()
+    except Exception:
+        return None
+    return None
+
+
+def request_text(page, url, headers=None, method="GET", timeout_ms=DEFAULT_TIMEOUT_MS):
+    """Fetch a URL over whichever transport works. Returns text or None."""
+    return (_in_page(page, url, headers, method, timeout_ms)
+            or _via_request_api(page, url, headers, method, timeout_ms))
+
+
+def request_json(page, url, headers=None, method="GET", timeout_ms=DEFAULT_TIMEOUT_MS):
+    return _to_json(request_text(page, url, headers, method, timeout_ms))
+
+
 def get_text(page, url, headers=None, timeout_ms=DEFAULT_TIMEOUT_MS):
-    return _request(page, url, headers, "GET", timeout_ms)
+    return request_text(page, url, headers, "GET", timeout_ms)
 
 
 def get_json(page, url, headers=None, timeout_ms=DEFAULT_TIMEOUT_MS):
-    return _to_json(get_text(page, url, headers, timeout_ms))
+    return request_json(page, url, headers, "GET", timeout_ms)
 
 
 def post_json(page, url, headers=None, timeout_ms=DEFAULT_TIMEOUT_MS):
     """POST and parse JSON. X's guest-token endpoint is POST-only."""
-    return _to_json(_request(page, url, headers, "POST", timeout_ms))
+    return request_json(page, url, headers, "POST", timeout_ms)
 
 
 def _to_json(text):

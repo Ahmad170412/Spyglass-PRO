@@ -256,7 +256,7 @@ document.addEventListener('DOMContentLoaded', function () {
   /* ── Load status on startup ── */
   apiFetch('/api/status').then(function (r) { return r.json(); }).then(function (data) {
     updateProxyUI(data.proxy || '');
-    updateModuleTags(data);
+    updateEngineTags(data);
   }).catch(function () {
     showToast('Server unreachable', 'error');
   });
@@ -327,7 +327,7 @@ function showToast(msg, type) {
    as a complete one. */
 var STATUS = null;
 
-function updateModuleTags(data) {
+function updateEngineTags(data) {
   STATUS = data || null;
   var tags = document.getElementById('moduleTags');
   if (!tags || !STATUS) return;
@@ -336,18 +336,28 @@ function updateModuleTags(data) {
   Object.keys(degraded).forEach(function (qtype) {
     degraded[qtype].forEach(function (tool) { missingFor[tool] = true; });
   });
+  var platformCount = (STATUS.platforms || []).length;
   tags.querySelectorAll('.mod-tag').forEach(function (tag) {
-    var mod = tag.getAttribute('data-mod');
-    var info = (STATUS.modules || {})[mod] || {};
+    var key = tag.getAttribute('data-mod');
+    var info = (STATUS.engines || {})[key] || {};
+    /* `problem` is what earns the degraded styling; `notes` is only tooltip
+       detail. "2 platforms registered" is not a problem. */
+    var problem = false;
     var notes = [];
     if (info.available === false) {
-      notes.push('engine not importable — its dependencies are missing');
-    } else if (mod === 'spyglass' && Object.keys(missingFor).length) {
+      problem = true;
+      notes.push('not importable — its dependencies are missing');
+    } else if (key === 'spyglass' && Object.keys(missingFor).length) {
+      problem = true;
       notes.push('partial recon: missing ' + Object.keys(missingFor).sort().join(', '));
+    } else if (key === 'social') {
+      notes.push(platformCount + ' platform' + (platformCount === 1 ? '' : 's') +
+                 ' registered' + (platformCount ? '' : ' — none importable'));
+      if (!platformCount) problem = true;
     }
-    tag.classList.toggle('degraded', notes.length > 0);
-    tag.title = notes.length ? notes.join(' · ')
-                             : (info.label || mod) + ' — all tools present';
+    tag.classList.toggle('degraded', problem);
+    tag.title = notes.length ? (info.label || key) + ' — ' + notes.join(' · ')
+                             : (info.label || key);
   });
   renderMissingNotice();
 }
@@ -511,8 +521,6 @@ function displayResults(containerId, data, append, qtype) {
 var RENDERERS = [
   { name: 'social',     matches: function (d) { return d.platform !== undefined && d.handle !== undefined; },
     render: renderSocial },
-  { name: 'instacloak', matches: function (d) { return d.tool === 'InstaCloak' || d.profile_status !== undefined; },
-    render: renderInstacloak },
   { name: 'investigate', matches: function (d, q) { return q === 'investigate' || d.entities !== undefined; },
     render: renderInvestigate },
   { name: 'lens',       matches: function (d) { return d.resolved_ip !== undefined || d.input_type !== undefined; },
@@ -933,87 +941,6 @@ function renderOpsec(d) {
   return html;
 }
 
-/* ── InstaCloak ── */
-function renderInstacloak(d) {
-  var html = '';
-  var p = d.profile || {};
-  var counts = p.counts || {};
-  var statBits = [];
-  if (counts.followers !== undefined && counts.followers !== null) statBits.push(counts.followers + ' followers');
-  if (counts.following !== undefined && counts.following !== null) statBits.push(counts.following + ' following');
-  if (counts.posts !== undefined && counts.posts !== null) statBits.push(counts.posts + ' posts');
-  if (p.full_name) statBits.unshift(p.full_name);
-  if (statBits.length) {
-    html += '<p class="res-line res-headline">' + escapeHtml(statBits.join(' — ')) + '</p>';
-  }
-  if (p.biography) html += '<p class="res-line">' + escapeHtml(p.biography) + '</p>';
-  var flags = [];
-  if (p.is_private) flags.push('private account');
-  if (p.verified) flags.push('verified');
-  if (d.profile_status && d.profile_status !== 'ok') flags.push('status: ' + d.profile_status);
-  if (flags.length) html += renderChips(flags);
-  html += renderKv(p, {pk_id: 'ID', profile_pic_url: 'Profile picture'});
-
-  if (Array.isArray(d.posts) && d.posts.length) {
-    var rows = d.posts.slice(0, 20).map(function (post) {
-      var caption = (post.caption || '').split('\n')[0];
-      if (caption.length > 90) caption = caption.slice(0, 90) + '…';
-      return '<tr><td>' + (caption ? escapeHtml(caption) : '<span class="dim">no caption</span>') + '</td>' +
-             '<td>' + escapeHtml(String(post.like_count !== undefined ? post.like_count : '—')) + '</td>' +
-             '<td>' + escapeHtml(String((post.comments || []).length)) + '</td></tr>';
-    }).join('');
-    html += renderSection('Posts (' + d.posts.length + ')',
-      '<table class="res-table"><thead><tr><th>Caption</th><th>Likes</th><th>Comments</th></tr></thead><tbody>' +
-      rows + '</tbody></table>');
-  }
-  if (d.contacts && (d.contacts.emails && d.contacts.emails.length ||
-                     d.contacts.phones && d.contacts.phones.length)) {
-    var contactHtml = '';
-    if (d.contacts.emails && d.contacts.emails.length) {
-      contactHtml += renderChips(d.contacts.emails);
-    }
-    if (d.contacts.phones && d.contacts.phones.length) {
-      contactHtml += renderChips(d.contacts.phones);
-    }
-    html += renderSection('Contacts', contactHtml);
-  }
-  [['hashtags', 'Top hashtags'], ['mentions', 'Top mentions'], ['commenters', 'Top commenters']].forEach(function (pair) {
-    var obj = d[pair[0]];
-    if (obj && Object.keys(obj).length) {
-      var top = Object.keys(obj).slice(0, 10);
-      html += renderSection(pair[1],
-        '<ul class="res-list res-rank">' + top.map(function (k) {
-          return '<li>' + escapeHtml(k) + ' <span class="dim">×' + obj[k] + '</span></li>';
-        }).join('') + '</ul>');
-    }
-  });
-  if (Array.isArray(d.tagged_users) && d.tagged_users.length) {
-    html += renderSection('Tagged users', renderChips(d.tagged_users.slice(0, 30)));
-  }
-  if (Array.isArray(d.locations) && d.locations.length) {
-    html += renderSection('Locations', renderChips(
-      d.locations.map(function (l) { return l.name || String(l); }).slice(0, 30)));
-  }
-  ['followers', 'following'].forEach(function (key) {
-    var f = d[key];
-    if (!f) return;
-    var status = f.walled ? 'login-walled' : (f.skipped ? 'skipped' : 'collected');
-    html += renderStatusLine(key + ' list', f.collected + ' collected (' + status +
-      (f.count !== undefined && f.count !== null ? ', profile says ' + f.count : '') + ')', !f.walled);
-  });
-  if (Array.isArray(d.notes) && d.notes.length) {
-    html += renderSection('Notes',
-      '<ul class="res-list">' + d.notes.map(function (n) {
-        return '<li>' + escapeHtml(n) + '</li>';
-      }).join('') + '</ul>');
-  }
-  html += renderGeneric(d, ['tool', 'version', 'target', 'run_at', 'duration_seconds',
-                            'profile_status', 'profile', 'posts_count', 'posts', 'contacts',
-                            'hashtags', 'mentions', 'locations', 'commenters', 'tagged_users',
-                            'followers', 'following', 'notes']);
-  return html;
-}
-
 /* ── Lens-Extender ── */
 function renderLens(d) {
   var html = '';
@@ -1094,11 +1021,12 @@ function renderInvestigate(d) {
   if (d.ip_recon && !d.ip_recon.error) {
     html += renderSection('IP recon (Lens-Extender)', renderBody(d.ip_recon, 'lens'));
   }
-  if (d.instacloak && !d.instacloak.error) {
-    html += renderSection('Instagram (InstaCloak)', renderBody(d.instacloak, 'instagram'));
+  if (d.social && !d.social.error) {
+    var socialLabel = (d.social.platform || 'social').toUpperCase();
+    html += renderSection(socialLabel + ' profile', renderBody(d.social, 'social'));
   }
   html += renderGeneric(d, ['inputs', 'entities', 'correlations', 'results',
-                            'ip_recon', 'instacloak', 'progress', 'summary']);
+                            'ip_recon', 'social', 'progress', 'summary']);
   return html;
 }
 

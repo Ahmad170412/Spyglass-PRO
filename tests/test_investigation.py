@@ -145,13 +145,14 @@ class RunnerInputTest(unittest.TestCase):
         with mock.patch.object(inv, "investigate",
                                return_value={"entities": {}, "correlations": []}), \
              mock.patch.object(runner, "run_lens", return_value={"ok": "lens"}) as lens, \
-             mock.patch.object(runner, "run_instacloak", return_value={"ok": "insta"}) as insta:
+             mock.patch.object(runner, "run_social", return_value={"ok": "insta"}) as social:
             r = runner.run_investigate({"website": "example.com",
                                         "ip": "8.8.8.8", "insta": "instagram"})
         lens.assert_called_once_with("8.8.8.8", {"passive": "1"})
-        insta.assert_called_once_with("instagram", {})
+        # The Instagram leg now shares the one social code path.
+        self.assertEqual(social.call_args[0][:2], ("instagram", "instagram"))
         self.assertEqual(r["ip_recon"], {"ok": "lens"})
-        self.assertEqual(r["instacloak"], {"ok": "insta"})
+        self.assertEqual(r["social"], {"ok": "insta"})
 
     def test_optional_legs_absent_by_default(self):
         from spyglass_pro import runner

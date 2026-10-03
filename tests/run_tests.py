@@ -71,7 +71,7 @@ def run_cases_ui():
         print("\n== cases UI ==\n  [SKIP] node not installed")
         return 0, 0
     print("\n== cases UI ==")
-    script = TESTS_DIR / "test_cases_ui.js"
+    script = TESTS_DIR / "test_frontend.js"
     proc = subprocess.run([shutil.which("node"), str(script)],
                           capture_output=True, text=True)
     sys.stdout.write(proc.stdout)

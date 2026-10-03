@@ -85,7 +85,12 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    """Module availability plus the optional CLI tools behind each one.
+    """Engines, social platforms, and the optional CLI tools behind them.
+
+    Two vocabularies exist and the UI needs both: *engines* are the vendored
+    packages that can fail to import, *platforms* are the adapters inside the
+    social harness. Reporting only the first made "INSTA" in the topbar a lie
+    once Instagram became a platform rather than an engine.
 
     The engines resolve their tools with ``shutil.which`` at *import* time,
     so a tool installed after the server started would stay invisible. Probe
@@ -93,20 +98,25 @@ def api_status():
     """
     tools = {name: bool(_which_any(*candidates))
              for name, candidates in _TOOL_PROBES.items()}
-    missing = sorted(name for name, found in tools.items() if not found)
+    platforms = []
+    try:
+        platforms = runner.social_platforms()
+    except Exception:
+        platforms = []
     return jsonify({
         "status": "ok",
         "version": __version__,
         "proxy": os.environ.get("SPYGLASS_PROXY", ""),
-        "modules": {
-            "spyglass": {"available": True, "label": "Spyglass-OSINT", "icon": "radar"},
-            "instacloak": {"available": _module_imports("instacloak"),
-                           "label": "InstaCloak", "icon": "camera"},
+        "engines": {
+            "spyglass": {"available": True, "label": "Spyglass-OSINT"},
             "lens_extender": {"available": _module_imports("lens_extender"),
-                              "label": "Lens-Extender", "icon": "lens"},
+                              "label": "Lens-Extender"},
+            "social": {"available": _module_imports("instacloak"),
+                       "label": "Social harness"},
         },
+        "platforms": platforms,
         "tools": tools,
-        "missing_tools": missing,
+        "missing_tools": sorted(name for name, found in tools.items() if not found),
         "degraded": _degraded(tools),
     })
 
@@ -177,16 +187,6 @@ def api_spyglass_run():
     flags = {key: value for key, value in request.args.items()
              if key not in ("module", "target")}
     return jsonify(runner.run_job(runner.run_spyglass, module, target, flags))
-
-
-@app.route("/api/instacloak/run", methods=["POST"])
-def api_instacloak_run():
-    """Run one InstaCloak profile collection."""
-    data = request.get_json(silent=True) or {}
-    username = (data.get("username") or "").strip()
-    if not username:
-        return jsonify({"error": "username required"})
-    return jsonify(runner.run_job(runner.run_instacloak, username, data))
 
 
 @app.route("/api/lens/run")

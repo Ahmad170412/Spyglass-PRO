@@ -14,9 +14,65 @@ too, so it goes through exactly the same lifecycle as the newer ones.
 
 from __future__ import annotations
 
+import contextlib
+import re
+import sys
+import threading
 import time
 
 from . import registry, schema
+
+# One stealth browser run at a time. The InstaCloak modules this harness
+# borrows write to process-wide UI hooks, so two concurrent collections
+# would interleave their progress lines and corrupt each other's reports.
+BROWSER_LOCK = threading.Lock()
+
+
+class ProgressSink:
+    """Collects the engines' progress lines for the dashboard."""
+
+    def __init__(self):
+        self.lines = []
+
+    def add(self, message):
+        line = re.sub(r"\s+", " ", str(message)).strip()
+        if line:
+            self.lines.append(line)
+
+
+@contextlib.contextmanager
+def bridge_progress(sink):
+    """Route InstaCloak's terminal UI into ``sink`` for the duration.
+
+    The modules bind ``say``/``say_parts``/``section`` into their own
+    namespaces at import time (``from .ui import say``), so patching
+    ``instacloak.ui`` alone would not reach the call sites — every loaded
+    module's binding has to be redirected individually.
+    """
+
+    def say(msg, *styles, **kwargs):
+        sink.add(re.sub(r"\[/?[^\]]+\]", "", str(msg)))
+
+    def say_parts(*parts, **kwargs):
+        text = "".join(str(p[0]) if isinstance(p, tuple) else str(p) for p in parts)
+        sink.add(re.sub(r"\[/?[^\]]+\]", "", text))
+
+    def section(n, total, msg, **kwargs):
+        sink.add(f"[{n}/{total}] " + re.sub(r"\[/?[^\]]+\]", "", str(msg)))
+
+    hooks = {"say": say, "say_parts": say_parts, "section": section}
+    saved = []
+    for name, module in list(sys.modules.items()):
+        if name == "instacloak" or name.startswith("instacloak."):
+            for attr, hook in hooks.items():
+                if getattr(module, attr, None) is not None:
+                    saved.append((module, attr, getattr(module, attr)))
+                    setattr(module, attr, hook)
+    try:
+        yield
+    finally:
+        for module, attr, original in saved:
+            setattr(module, attr, original)
 
 
 def _cfg_for(options: dict) -> dict:
@@ -41,14 +97,17 @@ def _cfg_for(options: dict) -> dict:
     return cfg
 
 
-def collect(platform_key: str, handle: str, options: dict | None = None) -> dict:
+def collect(platform_key: str, handle: str, options: dict | None = None,
+            progress: ProgressSink | None = None) -> dict:
     """Run one platform collection and return the normalized result.
 
     Never raises for an expected failure: a missing platform, a dead
     session or a login wall all come back as a result dict with notes, so
-    the dashboard always has something to render.
+    the dashboard always has something to render. ``progress`` collects the
+    engines' own step-by-step output for the dashboard's run log.
     """
     options = options or {}
+    progress = progress if progress is not None else ProgressSink()
     handle = (handle or "").strip().lstrip("@")
     result = schema.new_result(platform_key, handle)
 
@@ -69,18 +128,18 @@ def collect(platform_key: str, handle: str, options: dict | None = None) -> dict
     started = time.time()
     ctx = None
     try:
-        ctx = open_session(cfg, safe_dir_name(f"{platform.key}-{handle}"))
-        page = ctx.new_page()
+        with BROWSER_LOCK, bridge_progress(progress):
+            ctx = open_session(cfg, safe_dir_name(f"{platform.key}-{handle}"))
+            page = ctx.new_page()
 
-        wants_login = bool(cfg.get("login_enabled") and cfg.get("login_username"))
-        if wants_login and platform.login != "none":
-            login = _login(page, cfg, platform, result)
-            result["logged_in"] = login
-        elif wants_login:
-            schema.add_note(result, f"{platform.label} has no burner-login flow; "
-                                    "collected logged-out only")
+            wants_login = bool(cfg.get("login_enabled") and cfg.get("login_username"))
+            if wants_login and platform.login != "none":
+                result["logged_in"] = _login(page, cfg, platform, result)
+            elif wants_login:
+                schema.add_note(result, f"{platform.label} has no burner-login flow; "
+                                        "collected logged-out only")
 
-        platform.collect(page, cfg, handle, result)
+            platform.collect(page, cfg, handle, result)
     except SystemExit as exc:
         # open_session exits when cloakbrowser is missing.
         result["error"] = (f"stealth browser unavailable (exit {exc.code}). "
