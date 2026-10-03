@@ -58,6 +58,30 @@ def run_lens_smoke():
     return lens_smoke_test.PASS + lens_smoke_test.FAIL, lens_smoke_test.FAIL
 
 
+def run_cases_ui():
+    """The Cases panel's render functions, checked under node.
+
+    Skipped when node is unavailable — the Python suites still cover the
+    API side of the same panel.
+    """
+    import shutil
+    import subprocess
+
+    if not shutil.which("node"):
+        print("\n== cases UI ==\n  [SKIP] node not installed")
+        return 0, 0
+    print("\n== cases UI ==")
+    script = TESTS_DIR / "test_cases_ui.js"
+    proc = subprocess.run([shutil.which("node"), str(script)],
+                          capture_output=True, text=True)
+    sys.stdout.write(proc.stdout)
+    if proc.returncode:
+        sys.stdout.write(proc.stderr)
+    passed = sum(1 for line in proc.stdout.splitlines() if "[PASS]" in line)
+    failed = sum(1 for line in proc.stdout.splitlines() if "[FAIL]" in line)
+    return passed + failed, failed
+
+
 def main():
     total, failed = 0, 0
 
@@ -71,6 +95,10 @@ def main():
     ic_total, ic_failed = run_instacloak()
     total += ic_total
     failed += ic_failed
+
+    ui_total, ui_failed = run_cases_ui()
+    total += ui_total
+    failed += ui_failed
 
     ut_total, ut_failed = run_unittest_modules()
     total += ut_total

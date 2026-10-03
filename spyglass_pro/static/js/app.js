@@ -261,6 +261,34 @@ document.addEventListener('DOMContentLoaded', function () {
   if (casesForm) {
     casesForm.addEventListener('submit', function (e) { e.preventDefault(); });
   }
+
+  /* Clicking a stored case loads that exact target and query type, so the
+     filters can never be left pointing at someone else's target. */
+  var casesList = document.getElementById('casesList');
+  if (casesList) {
+    casesList.addEventListener('click', function (e) {
+      var row = e.target.closest && e.target.closest('tr.case-row');
+      if (!row) return;
+      var target = row.getAttribute('data-target') || '';
+      var qtype = row.getAttribute('data-qtype') || '';
+      document.getElementById('casesTarget').value = target;
+      var sel = document.getElementById('casesQtype');
+      if (sel) sel.value = qtype;
+      casesQuery('timeline');
+    });
+  }
+
+  /* "Search all query types" inside an empty-state message. */
+  var casesDetail = document.getElementById('casesDetail');
+  if (casesDetail) {
+    casesDetail.addEventListener('click', function (e) {
+      if (e.target.id !== 'casesResetQtype') return;
+      e.preventDefault();
+      var sel = document.getElementById('casesQtype');
+      if (sel) sel.value = '';
+      casesQuery('timeline');
+    });
+  }
   var caseButtons = [
     ['casesDiffBtn', 'diff'],
     ['casesTimelineBtn', 'timeline'],
@@ -981,7 +1009,11 @@ function loadCases() {
       }
       var html = '<table><thead><tr><th>Target</th><th>Type</th><th>Run ID</th><th>Time</th></tr></thead><tbody>';
       data.forEach(function (c) {
-        html += '<tr><td>' + escapeHtml(c.target) + '</td><td>' + escapeHtml(c.qtype) + '</td><td>' + c.id + '</td><td>' + escapeHtml(c.run_at) + '</td></tr>';
+        html += '<tr class="case-row" data-target="' + escapeHtml(c.target) +
+                '" data-qtype="' + escapeHtml(c.qtype) +
+                '" title="Load this target\'s timeline"><td>' + escapeHtml(c.target) +
+                '</td><td>' + escapeHtml(c.qtype) + '</td><td>' + c.id + '</td><td>' +
+                escapeHtml(c.run_at) + '</td></tr>';
       });
       html += '</tbody></table>';
       container.innerHTML = html;
@@ -1016,14 +1048,30 @@ function casesQuery(kind) {
                         escapeHtml(data.error) + '</span></p>';
         return;
       }
-      if (kind === 'diff') out.innerHTML = renderCaseDiff(data);
-      else if (kind === 'timeline') out.innerHTML = renderCaseTimeline(data);
-      else out.innerHTML = renderCaseProfile(data);
+      if (kind === 'diff') out.innerHTML = renderCaseDiff(data, qtype);
+      else if (kind === 'timeline') out.innerHTML = renderCaseTimeline(data, qtype);
+      else out.innerHTML = renderCaseProfile(data, qtype);
     })
     .catch(function (err) {
       out.innerHTML = '<p class="dim">Could not load ' + kind + '.</p>';
       showToast('Error: ' + err.message, 'error');
     });
+}
+
+/* "No results" has to say *why*. A stale Query Type filter looks exactly
+   like a broken feature otherwise, so name the filter and offer the way
+   out instead of a bare "no runs". */
+function emptyCases(d, qtype, kind) {
+  var target = (d && d.target) || '';
+  var html = '<p class="dim">No ' + escapeHtml(kind === 'diff' ? 'comparable ' : '') +
+             'stored runs match <strong>' + escapeHtml(target) + '</strong>' +
+             (qtype ? ' with query type <strong>' + escapeHtml(qtype) + '</strong>' : '') +
+             '.</p>';
+  if (qtype) {
+    html += '<p class="dim">The Query Type filter is narrowing this search. ' +
+            '<a href="#" id="casesResetQtype">Search all query types</a>.</p>';
+  }
+  return html;
 }
 
 function entityList(title, items, cls) {
@@ -1038,12 +1086,17 @@ function entityList(title, items, cls) {
   return html + '</tbody></table>';
 }
 
-function renderCaseDiff(d) {
+function renderCaseDiff(d, qtype) {
   if (!d) return '<p class="dim">No data.</p>';
   var html = '<h3>Entity diff — ' + escapeHtml(d.target || '') +
              (d.qtype ? ' (' + escapeHtml(d.qtype) + ')' : '') + '</h3>';
   if (d.error) {
-    return html + '<p class="res-line">' + escapeHtml(d.error) + '</p>';
+    if (!qtype && /need at least two/.test(d.error)) {
+      return html + emptyCases(d, qtype, 'diff');
+    }
+    return html + '<p class="res-line">' + escapeHtml(d.error) + '</p>' +
+           (qtype ? '<p class="dim">The Query Type filter is narrowing this search. ' +
+                   '<a href="#" id="casesResetQtype">Search all query types</a>.</p>' : '');
   }
   html += '<p class="res-line">Comparing <span class="status-ok">' +
           escapeHtml(d.old_run || '?') + '</span> → <span class="status-ok">' +
@@ -1053,9 +1106,9 @@ function renderCaseDiff(d) {
   return html;
 }
 
-function renderCaseTimeline(d) {
+function renderCaseTimeline(d, qtype) {
   var runs = (d && d.runs) || [];
-  if (!runs.length) return '<p class="dim">No stored runs for this target.</p>';
+  if (!runs.length) return emptyCases(d, qtype, 'timeline');
   var html = '<h3>Timeline — ' + escapeHtml(d.target || '') +
              ' (' + runs.length + ' run' + (runs.length === 1 ? '' : 's') + ')</h3>';
   html += '<table class="res-table"><thead><tr><th>Run</th><th>Type</th><th>Entities</th></tr></thead><tbody>';
@@ -1068,14 +1121,15 @@ function renderCaseTimeline(d) {
   return html;
 }
 
-function renderCaseProfile(d) {
+function renderCaseProfile(d, qtype) {
   if (!d) return '<p class="dim">No data.</p>';
+  var results = d.results || {};
+  if (!Object.keys(results).length && qtype) return emptyCases(d, qtype, 'profile');
   var html = '<h3>Dossier — ' + escapeHtml(d.target || '') + '</h3>';
   html += '<p class="res-line">Generated <span class="status-ok">' +
           escapeHtml(d.generated || '') + '</span> · schema v' +
           escapeHtml(String(d.schema_version === undefined ? '' : d.schema_version)) +
           ' · engine ' + escapeHtml(d.spyglass_version || '') + '</p>';
-  var results = d.results || {};
   var types = Object.keys(results);
   html += '<p class="res-line">Query types stored: <span class="status-ok">' +
           (types.length ? escapeHtml(types.join(', ')) : 'none') + '</span></p>';

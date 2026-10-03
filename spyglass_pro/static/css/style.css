@@ -987,6 +987,16 @@ body {
   text-transform: uppercase;
 }
 
+/* Clickable row: loads that target + query type into the form above. */
+.cases-area tr.case-row {
+  cursor: pointer;
+}
+
+.cases-area tr.case-row:hover td {
+  background: var(--card-hover);
+  color: var(--fg);
+}
+
 /* ── Dim text ── */
 .dim {
   color: var(--fg-dim);
