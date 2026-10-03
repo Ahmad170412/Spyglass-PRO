@@ -7,7 +7,7 @@ Unified OSINT dashboard that wires three recon engines into one platform:
 | Engine | Purpose |
 | --- | --- |
 | **Spyglass-OSINT** | Email / username / phone / website / IP / dark-web / OPSEC / metadata recon |
-| **InstaCloak** | Instagram profile collection (posts, contacts, followers, tags) |
+| **Social harness** | Stealth profile recon across registered platforms (Instagram, X, …) |
 | **Lens-Extender** | Long-range IP/domain recon — passive-first, optional active nmap |
 
 The **Investigation** view runs the engines in parallel and correlates
@@ -32,6 +32,50 @@ python run.py            # or: python -m spyglass_pro  /  spyglass-pro
 ```
 
 Then open <http://127.0.0.1:5000>.
+
+## Social recon
+
+The **Social Recon** panel collects one profile across every registered
+platform. Instagram and X ship today; each platform is an adapter that
+declares its identity, capabilities and a `collect()` function, so adding
+another is a new module plus a `@register` line.
+
+| Variable | Purpose |
+| --- | --- |
+| `SPYGLASS_X_TOKEN` | X API v2 user-context token (`users.read`). **The supported path — prefer it.** |
+| `SPYGLASS_X_BEARER` | Override the public web bearer used by the fallback path |
+| `SPYGLASS_X_QUERY_ID` | Override the `UserByScreenName` GraphQL operation id |
+
+Without `SPYGLASS_X_TOKEN`, X falls back to the endpoints its own web client
+uses. That path works but is a moving target: the bearer and the GraphQL
+operation id are rotated by X on its own schedule, so the adapter resolves
+the bearer from an env override, then a baked-in value, then live discovery
+from X's bundle — a rotation degrades to a slower run rather than a failed
+one. Expect the query id to need `SPYGLASS_X_QUERY_ID` from time to time.
+
+Results are honest about what was not retrieved: a follower list that needs
+a login is reported as **walled with a reason**, never as an empty list, and
+a partially-retrieved list is labelled partial.
+
+Adding a platform:
+
+```python
+# spyglass_pro/social/platforms/<name>.py
+from .. import registry
+from ..schema import set_fields, add_wall
+
+def collect(page, cfg, handle, result): ...
+def normalize(raw, result): ...          # pure — unit-test it offline
+
+registry.register(registry.Platform(
+    key="tiktok", label="TikTok", url="https://tiktok.com/@{handle}",
+    capabilities=("profile", "bio", "follower_count"),
+    login="none", collect=collect,
+))
+```
+
+Then list it in `registry.load_all()` and it appears in the UI, the report
+and the API with no other changes.
 
 ## Test
 
@@ -80,10 +124,12 @@ applicable laws.
 
 ```
 run.py                  dev entry point
-tests/                  239 offline checks (run_tests.py)
+tests/                  297 offline checks (run_tests.py)
 spyglass_pro/
   app.py                Flask routes + auth gate + proxy validation
   runner.py             job pool (queue cap, timeouts), engine dispatch
+  social/               multi-platform social harness (schema, registry,
+                        adapters) — merge layer, not vendored
   cli.py                `spyglass-pro` console entry point
   templates/ static/    dashboard UI
   modules/              vendored engines (see NOTICE)
