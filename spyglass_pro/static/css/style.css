@@ -60,15 +60,6 @@ body {
   font-weight: 800;
 }
 
-.badge {
-  font-size: 10px;
-  background: var(--accent);
-  color: #000;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 700;
-}
-
 .topbar-right {
   display: flex;
   align-items: center;

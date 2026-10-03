@@ -58,8 +58,7 @@ def _gate_api():
 
 @app.route("/")
 def index():
-    # The version badge is rendered from version.py — one source of truth.
-    return render_template("index.html", version=__version__)
+    return render_template("index.html")
 
 
 @app.route("/api/status")
