@@ -79,8 +79,7 @@ def load_all() -> dict:
         for module in ("instagram", "x"):
             try:
                 importlib.import_module(f"{__package__}.platforms.{module}")
-            except Exception:
-                # A broken adapter must not take the others down with it.
+            except Exception:  # noqa: S112 - a broken adapter must not hide the rest
                 continue
         _LOADED = True
     return _REGISTRY

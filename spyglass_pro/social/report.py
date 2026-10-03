@@ -127,4 +127,4 @@ def summary(result: dict) -> str:
     return f"{base} — {detail}" if detail else f"{base} complete"
 
 
-__all__ = ["render", "write", "summary", "PROFILE_FIELDS"]
+__all__ = ["PROFILE_FIELDS", "render", "summary", "write"]

@@ -8,7 +8,7 @@ Unified OSINT dashboard that wires three recon engines into one platform:
 | --- | --- |
 | **Spyglass-OSINT** | Email / username / phone / website / IP / dark-web / OPSEC / metadata recon |
 | **Social harness** | Stealth profile recon across registered platforms (Instagram, X, …) |
-| **Lens-Extender** | Long-range IP/domain recon — passive-first, optional active nmap |
+| **Lens-Extender** | Long-range IP/domain recon — passive only |
 
 The **Investigation** view runs the engines in parallel and correlates
 entities across sources (shared emails, IPs, domains, usernames).
@@ -22,8 +22,31 @@ pip install -e .
 ```
 
 Optional CLI engines (sherlock, maigret, holehe, user-scanner, ignorant,
-nmap) are discovered on `PATH` when installed; every module degrades
+shodan) are discovered on `PATH` when installed; every module degrades
 gracefully when one is missing.
+
+## Passive-only
+
+**Spyglass-Pro never opens a connection to a target.** Every query goes to
+a third party: DNS resolvers, Certificate Transparency logs, WHOIS
+registries, Shodan, InternetDB, RDAP, RIPEstat, GreyNoise, Censys,
+Wayback, crt.sh, CertSpotter, HackerTarget, breach databases.
+
+There is no port scan, no directory brute force, no HTTP probing of
+discovered hosts, no zone-transfer attempt and not even a fetch of the
+target's homepage. That code was **removed, not disabled** — see
+[AUDIT-2026-10.md](AUDIT-2026-10.md#active-scanning-removed) for the exact
+list — so none of it can be switched back on by configuration or a stray
+flag.
+
+Where the line sits: ordinary DNS record lookups (A, MX, NS, TXT, SPF,
+DMARC, CNAME) are still made, because no useful host recon exists without
+them and every OSINT tool treats them as passive.
+
+What that costs you, plainly: no HTTP headers, no TLS certificate or cipher
+details, no technology fingerprinting, no robots.txt or sitemap, no page
+content, no favicon hash and no exposed-file findings. Active collection
+lives in a separate project.
 
 ## Run
 
@@ -114,11 +137,12 @@ see `spyglass-pro --help`):
 
 ## Responsible use
 
-OSINT tools are dual-use. Only scan systems and accounts you own or have
-explicit permission to test. Instagram collection via InstaCloak may
-violate the platform's terms of service; active (nmap) scanning is
-regulated in some jurisdictions. You are responsible for compliance with
-applicable laws.
+OSINT tools are dual-use. Only investigate systems and accounts you own or
+have explicit permission to test. Instagram and X collection may violate
+those platforms' terms of service. Because Spyglass-Pro is passive-only it
+does not touch a target's network — but the social module still drives a
+real browser against a real account, so use burner credentials you are
+willing to lose. You are responsible for compliance with applicable laws.
 
 ## Project structure
 

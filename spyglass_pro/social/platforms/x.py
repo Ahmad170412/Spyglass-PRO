@@ -108,17 +108,13 @@ def discover_bearer(page) -> str | None:
     for chunk in chunks:
         try:
             body = fetch_text(page, _WEB_BUNDLE_BASE + chunk) or ""
-        except Exception:
+        except Exception:  # noqa: S112 - best effort: skip chunks that fail
             continue
         match = _BEARER_RE.search(body)
         if match:
             _bearer_cache = match.group(0)
             return _bearer_cache
     return None
-
-
-def bearer() -> str:
-    return os.environ.get("SPYGLASS_X_BEARER", "").strip() or _DEFAULT_BEARER
 
 
 def _headers(token: str) -> dict:
@@ -260,14 +256,15 @@ def collect_official(page, handle: str, result: dict) -> bool:
 
 def collect(page, cfg, handle: str, result: dict) -> None:
     """Fill `result` with what X will give us for `handle`."""
-    from ..http import get_json
     from instacloak.human import dismiss_login_popup, warmup_scrolls
 
+    from ..http import get_json
+
     # An explicit token takes the supported path and needs no browser warmup.
-    if os.environ.get("SPYGLASS_X_TOKEN", "").strip():
-        if collect_official(page, handle, result):
-            _apply_walls(result, result.get("logged_in", False))
-            return
+    if (os.environ.get("SPYGLASS_X_TOKEN", "").strip()
+            and collect_official(page, handle, result)):
+        _apply_walls(result, result.get("logged_in", False))
+        return
 
     # Requests go out through in-page fetch, which is subject to CORS — so the
     # page has to actually be on x.com first. Navigating also warms the

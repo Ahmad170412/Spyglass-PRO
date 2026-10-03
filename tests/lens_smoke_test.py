@@ -12,10 +12,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spyglass_pro" / "modules"))
 
-from lens_extender import analyzer, config, report as report_mod, scanner  # noqa: E402
-from lens_extender.app import validate_target  # noqa: E402
-from lens_extender.analyzer import _parse_cpes, _age_days  # noqa: E402
-from lens_extender.osint import _sanitize, _clean, dnsbl_check, _is_ip  # noqa: E402
+from lens_extender import analyzer, config
+from lens_extender import report as report_mod
+from lens_extender.analyzer import _age_days, _parse_cpes
+from lens_extender.app import validate_target
+from lens_extender.osint import _clean, _is_ip, _sanitize, dnsbl_check
 
 PASS, FAIL = 0, 0
 
@@ -106,23 +107,6 @@ loaded = config.load()
 check("round-trips key", loaded["shodan_api_key"] == "testkey")
 mode = os.stat(config.CONFIG_FILE).st_mode & 0o777
 check("file chmod 600", mode == 0o600, f"got {oct(mode)}")
-
-print("== adaptive timeout ==")
-import lens_extender.scanner as sc
-
-orig = sc._measure_rtt
-sc._measure_rtt = lambda ip: None
-check("no RTT -> 120s", scanner.adaptive_host_timeout("1.2.3.4") == "120s")
-sc._measure_rtt = lambda ip: 0.5
-val = int(scanner.adaptive_host_timeout("1.2.3.4")[:-1])
-check("local RTT -> 15-60s tier", 15 <= val <= 60, f"got {val}s")
-sc._measure_rtt = lambda ip: 200.0
-val = int(scanner.adaptive_host_timeout("1.2.3.4")[:-1])
-check("regional RTT -> 30-120s tier", 30 <= val <= 120, f"got {val}s")
-sc._measure_rtt = lambda ip: 400.0
-val = int(scanner.adaptive_host_timeout("1.2.3.4")[:-1])
-check("intercontinental RTT -> >=120s tier", 120 <= val <= 300, f"got {val}s")
-sc._measure_rtt = orig
 
 print("== DNSBL logic ==")
 check("_is_ip dotted quad", _is_ip("1.2.3.4") and not _is_ip("example.com"))

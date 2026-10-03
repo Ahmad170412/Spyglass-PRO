@@ -57,6 +57,11 @@ ignore = [
     "DTZ005", "PLW0603", "SIM105", "SIM112", "B904", "PLW2901", "PIE810",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# The inherited engine suites use bare asserts and literal credentials as
+# fixtures; that is their upstream style, not a finding.
+"tests/*" = ["S101", "S105", "S106", "S301", "S603", "S607", "SIM117", "E402"]
+
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true

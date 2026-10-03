@@ -1,8 +1,11 @@
-"""Lens-Extender — long-range IP reconnaissance TUI.
+"""Lens-Extender — long-range IP reconnaissance TUI. PASSIVE ONLY.
 
-Passive-first OSINT across 15+ keyless sources, optional stealth-scanned
-nmap (decoys / Tor), Rich TUI dashboard, markdown/json/csv export,
-SQLite case store for history.
+Recon from 15+ keyless sources: Shodan, InternetDB, RDAP, RIPEstat,
+GreyNoise, reverse DNS and DNSBL. Nothing here connects to the target. The
+optional active nmap scan (with decoys, Tor routing, UDP, NSE scripts and
+port specs) was removed rather than switched off.
+
+Still includes the Rich TUI dashboard and a SQLite case store for history.
 """
 
 import argparse
@@ -13,49 +16,10 @@ from lens_extender import __version__, app
 def cli() -> None:
     parser = argparse.ArgumentParser(
         prog="lens-extender",
-        description="Long-range IP/domain reconnaissance with a Rich TUI dashboard. Passive-first, OPSEC-aware.",
+        description="Long-range IP/domain reconnaissance with a Rich TUI dashboard. Passive-only, OPSEC-aware.",
     )
     parser.add_argument("target", nargs="*", help="Target IP address or domain (prompted if omitted)")
     parser.add_argument("--version", action="version", version=f"lens-extender {__version__}")
-    parser.add_argument(
-        "--decoys",
-        type=int,
-        default=0,
-        metavar="N",
-        help="Active scans only: hide your IP among N random decoy IPs (nmap -D RND:N,ME)",
-    )
-    parser.add_argument(
-        "--tor",
-        action="store_true",
-        help="Active scans only: route nmap through Tor SOCKS proxy on 127.0.0.1:9050",
-    )
-    parser.add_argument(
-        "--ports",
-        type=str,
-        default=None,
-        metavar="SPEC",
-        help="Active scans only: nmap port spec (e.g. '1-65535', '1-1000,8080', 'top2000'). Default: top 1000",
-    )
-    parser.add_argument(
-        "--udp",
-        action="store_true",
-        help="Active scans only: add UDP top 100 ports (slower, extra coverage)",
-    )
-    parser.add_argument(
-        "--scripts",
-        type=str,
-        default="default,http-title,http-server-header,ssl-cert,ssl-enum-ciphers,banner",
-        metavar="LIST",
-        help="Active scans only: comma-separated NSE scripts. Use '' to disable",
-    )
-    parser.add_argument(
-        "--intensity",
-        type=int,
-        default=5,
-        choices=range(10),
-        metavar="0-9",
-        help="Active scans only: version detection intensity 0-9 (default 5)",
-    )
     parser.add_argument(
         "--json",
         action="store_true",

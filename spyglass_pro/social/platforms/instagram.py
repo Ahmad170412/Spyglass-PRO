@@ -56,7 +56,7 @@ def normalize(report: dict, result: dict) -> None:
         verified=bool(profile.get("is_verified")),
         private=bool(profile.get("is_private")),
         avatar_url=profile.get("profile_pic") or profile.get("profile_pic_url"),
-        external_links=profile.get("external_url") and [profile["external_url"]] or [],
+        external_links=(profile.get("external_url") and [profile["external_url"]]) or [],
         contact_email=profile.get("business_email") or profile.get("public_email"),
     )
 
@@ -126,9 +126,9 @@ def collect(page, cfg, handle: str, result: dict) -> None:
     from instacloak.post import shortcodes_from_dom, visit_post
     from instacloak.profile import _hd_propic_url, get_profile, norm_profile, profile_from_embedded
     from instacloak.report import build_report
+    from instacloak.session import safe_dir_name
     from instacloak.social import attempt_relationship_list
     from instacloak.stories import collect_stories
-    from instacloak.session import safe_dir_name
 
     logged_in = bool(result.get("logged_in"))
     deep = bool(cfg.get("deep"))

@@ -194,8 +194,6 @@ def _render_website(r: dict) -> list[str]:
     wc = r.get("wildcard_dns", {})
     if wc:
         lines += _kv_section("Wildcard DNS", wc)
-    if r.get("zone_transfer"):
-        lines += _section("Zone transfer (AXFR)", r["zone_transfer"])
     subs = r.get("subdomains")
     if subs:
         lines += _section("Subdomains (unified)", subs)
@@ -205,14 +203,7 @@ def _render_website(r: dict) -> list[str]:
     for key, label in (
         ("wayback_subdomains", "Subdomains (Wayback Machine)"),
         ("crt_sh_subdomains", "Subdomains (certificate transparency)"),
-        ("http_probe", "HTTP probe (httpx)"),
-        ("port_scan", "Port scan (nmap)"),
         ("shodan", "Shodan"),
-        ("directories", "Directories (gobuster)"),
-        ("interesting_files", "Interesting / exposed files"),
-        ("robots", "robots.txt"),
-        ("sitemap", "Sitemap"),
-        ("js_endpoints", "JavaScript endpoints"),
         ("js_interesting", "JavaScript interesting strings"),
         ("reverse_dns", "Reverse DNS"),
         ("ptr_sweep", "Reverse DNS sweep (/24)"),
@@ -245,7 +236,7 @@ def _render_website(r: dict) -> list[str]:
     if hist:
         lines += _kv_section("Wayback history", hist)
     covered = {
-        "dns_records", "dns_email_security", "wildcard_dns", "zone_transfer",
+        "dns_records", "dns_email_security", "wildcard_dns",
         "subdomains", "subdomain_sources", "wayback_subdomains",
         "crt_sh_subdomains", "http_probe", "port_scan", "shodan",
         "directories", "interesting_files", "robots", "sitemap",
@@ -281,9 +272,6 @@ def _render_ip(r: dict) -> list[str]:
     shodan = r.get("shodan", {})
     if shodan:
         lines += _kv_section("Shodan", shodan)
-    ports = r.get("open_ports")
-    if ports:
-        lines += _section("Open ports (nmap)", [str(p) for p in ports])
     return lines
 
 

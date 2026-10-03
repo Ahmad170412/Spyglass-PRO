@@ -196,8 +196,7 @@ def _sg_ip(target, flags, progress):
         from spyglass_osint import ip as mod
     except ImportError as exc:
         return {"error": f"ip module unavailable: {exc}"}
-    return _finish(mod.address(target, top_ports=flags.get("ports") or None),
-                   "ip", target, flags, progress)
+    return _finish(mod.address(target), "ip", target, flags, progress)
 
 
 def _sg_opsec(target, flags, progress):
@@ -341,7 +340,7 @@ def _spyglass_summary(qtype, target, result):
 # ─── Lens-Extender ─────────────────────────────────────────────
 
 def run_lens(target, flags):
-    """Run Lens-Extender passive recon, optionally with an nmap scan."""
+    """Run Lens-Extender passive recon (Shodan, InternetDB, RDAP, …)."""
     flags = flags or {}
     target = (target or "").strip()
     if not target:
@@ -352,7 +351,6 @@ def run_lens(target, flags):
         from lens_extender import analyzer as le_analyzer
         from lens_extender import config as le_config
         from lens_extender import osint as le_osint
-        from lens_extender import scanner as le_scanner
         from lens_extender import store as le_store
     except ImportError as exc:
         return {"error": f"Lens-Extender unavailable: {exc} (pip install httpx)"}
@@ -374,26 +372,15 @@ def run_lens(target, flags):
     except Exception as exc:
         return {"error": f"passive recon failed: {_safe_error(exc)}"}
 
+    # Passive only: no scan_result, so the analyzer builds its port view
+    # purely from Shodan and InternetDB. The active nmap path was removed
+    # from this package.
     scan_type = "passive"
-    scan_result = None
-    if flags.get("active"):
-        scan_type = "active"
-        scan_ip = osint_result.resolved_ip or target
-        try:
-            scan_result = le_scanner.scan(
-                scan_ip,
-                log_cb,
-                tor=bool(flags.get("tor")),
-                ports=flags.get("ports") or None,
-            )
-        except Exception as exc:
-            progress.add(f"active scan failed: {exc}")
-
     try:
-        report = le_analyzer.build_report(target, osint_result, scan_result)
+        report = le_analyzer.build_report(target, osint_result, None)
     except Exception as exc:
         return {"error": f"report build failed: {_safe_error(exc)}"}
-    progress.add(f"lens-extender {scan_type} scan complete")
+    progress.add("lens-extender passive recon complete")
 
     stored_run_id = None
     if flags.get("store"):

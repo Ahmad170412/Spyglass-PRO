@@ -2,7 +2,6 @@
 
 import datetime
 import ipaddress
-import sys
 
 from rich import box
 from rich.console import Console
@@ -11,7 +10,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from lens_extender import analyzer, osint, scanner
+from lens_extender import analyzer, osint
 from lens_extender import report as report_mod
 
 console = Console()
@@ -511,65 +510,10 @@ def render_dashboard(target: str, options: dict | None = None) -> dict:
         osint_result = osint.gather(target, config, log_line)
     scan_result = None
 
-    if scanner.available():
-        warning = "[bold yellow]Run active nmap scan?[/] Your IP will be visible to the target."
-        decoys, use_tor = int(options.get("decoys") or 0), bool(options.get("tor"))
-        ports = options.get("ports")
-        udp = bool(options.get("udp"))
-        scripts = options.get(
-            "scripts",
-            "default,http-title,http-server-header,ssl-cert,ssl-enum-ciphers,banner",
-        )
-        intensity = int(options.get("intensity", 5))
-        details = []
-        if ports:
-            details.append(f"ports {ports}")
-        if udp:
-            details.append("UDP top 100")
-        if scripts is not None and str(scripts).strip() == "":
-            details.append("no NSE")
-        if intensity != 5:
-            details.append(f"intensity {intensity}")
-        suffix = f" ({', '.join(details)})" if details else ""
-        if decoys and use_tor:
-            warning = f"[bold yellow]Run active nmap scan?[/] Routed via Tor + {decoys} random decoys{suffix}."
-        elif decoys:
-            warning = f"[bold yellow]Run active nmap scan?[/] Your real IP hidden among {decoys} random decoys{suffix}."
-        elif use_tor:
-            warning = f"[bold yellow]Run active nmap scan?[/] Routed through Tor exit node{suffix}."
-        elif suffix:
-            warning = f"[bold yellow]Run active nmap scan?[/] Your IP will be visible to the target{suffix}."
-
-        auto_confirm = options.get("no_interactive", False)
-        if auto_confirm or Confirm.ask(f"\n{warning}", default=False):
-            console.print("\n[bold]Active scan[/] ([yellow]direct connection to target network[/])")
-            ip = osint_result.resolved_ip or target
-            with console.status(
-                f"[{THEME_BRIGHT}]Running active nmap scan... (this can take a while)[/]",
-                spinner="dots",
-            ):
-                scan_result = scanner.scan(
-                    ip,
-                    log_line,
-                    decoys=decoys,
-                    tor=use_tor,
-                    ports=ports,
-                    udp=udp,
-                    scripts=scripts,
-                    intensity=intensity,
-                )
-    else:
-        if sys.platform == "win32":
-            console.print(
-                "[dim]Active nmap scanning unavailable — install from https://nmap.org/download.html "
-                "and ensure nmap.exe is on PATH (or set NMAP_PATH).[/dim]"
-            )
-        elif sys.platform == "darwin":
-            console.print("[dim]Active nmap scanning unavailable — install via: brew install nmap[/dim]")
-        else:
-            console.print(
-                "[dim]Active nmap scanning unavailable — install via your package manager (apt/dnf/pacman).[/dim]"
-            )
+    # Active scanning was removed from this package. nmap opened a direct
+    # connection to the target; the port data below now comes only from
+    # Shodan and InternetDB.
+    scan_result = None
 
     data = analyzer.build_report(target, osint_result, scan_result)
     console.print()
@@ -585,14 +529,14 @@ def render_dashboard(target: str, options: dict | None = None) -> dict:
         console.print()
         console.print(panel)
 
-    if ports := data.get("ports"):
+    if data.get("ports"):
         console.print()
         console.print(ports_table(data))
         if panel := nse_scripts_panel(data):
             console.print()
             console.print(panel)
     else:
-        console.print("\n[dim]No port data available (enable Shodan key or active scan).[/]")
+        console.print("\n[dim]No port data available — Shodan returned none for this host.[/]")
 
     if table := software_table(data):
         console.print()
@@ -754,16 +698,6 @@ def run(args) -> None:
     show_banner()
 
     options = {
-        "decoys": getattr(args, "decoys", 0),
-        "tor": getattr(args, "tor", False),
-        "ports": getattr(args, "ports", None),
-        "udp": getattr(args, "udp", False),
-        "scripts": getattr(
-            args,
-            "scripts",
-            "default,http-title,http-server-header,ssl-cert,ssl-enum-ciphers,banner",
-        ),
-        "intensity": getattr(args, "intensity", 5),
         "proxy": getattr(args, "proxy", None),
         "json_output": getattr(args, "json_output", False),
         "csv_output": getattr(args, "csv", False),

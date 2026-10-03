@@ -15,10 +15,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spyglass_pro" / "modules"))
 
-from instacloak import auth, jsonutil  # noqa: E402
-from instacloak import config as configmod  # noqa: E402
-from instacloak import contacts, profile, report, social, stories  # noqa: E402
-from instacloak import post as postmod  # noqa: E402
+from instacloak import auth, contacts, jsonutil, profile, report, social, stories
+from instacloak import config as configmod
+from instacloak import post as postmod
 
 
 def html_with_blobs(*payloads) -> str:
@@ -280,6 +279,7 @@ def test_deep_metadata_extraction():
 def test_login_config_roundtrip():
     """save_login_config writes/replaces [login], preserving other sections."""
     import tempfile
+
     import tomllib
 
     with tempfile.TemporaryDirectory() as tmp:

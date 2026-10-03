@@ -38,14 +38,15 @@ class RenderIpTest(unittest.TestCase):
         r = {
             "ip": "1.2.3.4",
             "geo": {"country": "US", "city": "Testville", "isp": "Test ISP"},
-            "open_ports": [22, 443],
+            "shodan": {"ports": [22, 443], "hostnames": ["x.example.com"]},
         }
         md = report.render(r, "ip", "1.2.3.4")
         self.assertIn("### Geolocation", md)
         self.assertIn("**Country:** US", md)
-        self.assertIn("### Open ports (nmap)", md)
-        self.assertIn("- 22", md)
-        self.assertIn("- 443", md)
+        # Port data is Shodan's now; the nmap section is gone with the scan.
+        self.assertIn("### Shodan", md)
+        self.assertIn("22", md)
+        self.assertNotIn("Open ports (nmap)", md)
 
 
 class RenderErrorTest(unittest.TestCase):

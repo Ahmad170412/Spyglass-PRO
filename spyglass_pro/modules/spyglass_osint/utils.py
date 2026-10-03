@@ -35,7 +35,7 @@ def _proxy_prefix(cmd):
     if not _PROXY or not cmd:
         return cmd
     base = os.path.basename(cmd[0])
-    if base in {"dig", "nmap", "whois"} and _TORSOCKS:
+    if base in {"dig", "whois"} and _TORSOCKS:
         return [_TORSOCKS, *cmd]
     return cmd
 
@@ -66,9 +66,6 @@ if not _BB:
             break
 
 _DIG = shutil.which("dig")
-_NMAP = shutil.which("nmap")
-_GOBUSTER = shutil.which("gobuster")
-_HTPPX = shutil.which("httpx")
 _WHOIS = shutil.which("whois")
 _CURL = shutil.which("curl")
 _SHODAN = shutil.which("shodan")

@@ -1,33 +1,48 @@
-"""Website reconnaissance for Spyglass.
+"""Website reconnaissance for Spyglass — PASSIVE ONLY.
 
-A deep, defense-in-depth rebuild of the original module. Every probe is
-independent and best-effort: a missing tool, an offline API, or a refused
-connection degrades gracefully instead of failing the whole run.
+This module never opens a connection to the target. It resolves DNS,
+Certificate Transparency logs, WHOIS registries, the Wayback Machine and
+Shodan, and stops there. It does not fetch the target's pages, probe its
+ports, brute-force paths, or enumerate subdomains by dictionary.
+
+Active collection lives in a separate project. Everything that used to run
+here was removed rather than switched off, so none of it can be re-enabled
+by configuration: nmap service detection, gobuster directory and DNS brute
+force, httpx probing of discovered hosts, the homepage fetch behind the
+fingerprint and content phases, exposure-path checks, the adjacent-host PTR
+sweep, and DNS zone-transfer (AXFR) attempts.
+
+Where the line sits: ordinary DNS record lookups (A, MX, NS, TXT, SPF,
+DMARC, CNAME) are still made, because no useful host recon exists without
+them and every OSINT tool treats them as passive. A zone transfer is a
+deliberate attempt to dump a whole zone, so it is not, and it is gone.
+
+What this costs you, stated plainly: no HTTP headers, no TLS certificate or
+cipher details, no server/technology fingerprinting, no robots.txt or
+sitemap, no page content, no favicon hash, no exposure-path findings and no
+zone transfer. All of those require touching the target.
 
 Design principles
 -----------------
 * No paid APIs and no API keys. Passive sources are crt.sh, HackerTarget,
-  AlienVault OTX (public endpoint), and the Wayback Machine CDX index.
-* OPSEC-aware: HTTP goes through curl (which honors --proxy); DNS through
-  ``dig`` is routed via torsocks when a proxy is active; in-process DNS
-  resolution is only used when no proxy is set, so the operator's resolver is
-  never leaked through Tor.
-* macOS/Linux focused: dig, curl, whois, nmap, gobuster, httpx and shodan are
-  auto-detected and skipped cleanly when absent.
+  AlienVault OTX (public endpoint), CertSpotter, and the Wayback Machine CDX
+  index.
+* OPSEC-aware: HTTP goes through curl (which honors --proxy) to third-party
+  hosts only; DNS through ``dig`` is routed via torsocks when a proxy is
+  active; in-process DNS resolution is only used when no proxy is set, so the
+  operator's resolver is never leaked through Tor.
+* dig, curl, whois and shodan are auto-detected and skipped cleanly when
+  absent.
 """
 
 from __future__ import annotations
 
-import base64
 import concurrent.futures
-import hashlib
 import json
 import os
 import re
 import socket
-import ssl
 import subprocess
-import time
 import urllib.parse
 import urllib.request
 
@@ -35,9 +50,6 @@ from . import utils
 from .utils import (
     _CURL,
     _DIG,
-    _GOBUSTER,
-    _HTPPX,
-    _NMAP,
     _SHODAN,
     _WHOIS,
     _check_tool,
@@ -104,102 +116,11 @@ _SUB_LIST = [
     "location", "store2", "stores", "locator",
 ]
 
-_DIR_LIST = """
-admin administrator api app assets backup backups cache cdn cgi-bin cmd config
-configuration content css dashboard db demo dev docs download downloads error
-examples export favicon.ico files fonts forum graphql help home html images
-img include includes index install js json language lib library license login
-log logs mail media migrate mobile modules news old package pages panel
-phpinfo.php plugins private prod public README readme reports rest robots.txt
-rss sass save scripts search secure server-status service services session
-setup sitemap.xml sql src ssh stat static stats status storage styles svn
-swagger temp template templates test tmp todo tools tmp update upload uploads
-user users v2 vendor version video views web webapp webroot wiki wpad.dat www
-xml xmlrpc
-""".strip().split()
 
 
-def _dir_wordlist():
-    """Bundled list, or a local SecLists directory wordlist when available."""
-    for path in (
-        "/usr/share/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt",
-        "/usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt",
-        "/opt/homebrew/share/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt",
-        "/usr/local/share/seclists/Discovery/Web-Content/directory-list-2.3-medium.txt",
-        os.path.expanduser("~/SecLists/Discovery/Web-Content/directory-list-2.3-medium.txt"),
-        os.path.expanduser("~/wordlists/directory-list-2.3-medium.txt"),
-    ):
-        try:
-            if os.path.isfile(path):
-                with open(path, encoding="utf-8", errors="ignore") as f:
-                    return [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
-        except OSError:
-            continue
-    return _DIR_LIST
 
-# Well-known files whose presence leaks configuration, secrets, or the stack.
-_EXPOSURE_PATHS = (
-    "/.git/config", "/.git/HEAD", "/.env", "/.env.bak", "/.env.example",
-    "/.env.local", "/.DS_Store", "/.htaccess", "/web.config", "/.svn/entries",
-    "/.aws/credentials", "/.dockerenv", "/id_rsa", "/id_rsa.pub",
-    "/backup.zip", "/backup.tar.gz", "/dump.sql", "/db.sql", "/backup.sql",
-    "/wp-config.php.bak", "/wp-config.php~", "/config.php.bak", "/config.php~",
-    "/phpinfo.php", "/server-status", "/debug.log", "/error_log",
-    "/package.json", "/composer.json", "/.npmrc", "/crossdomain.xml",
-    "/security.txt", "/.well-known/security.txt",
-    "/wp-login.php", "/admin", "/administrator", "/login", "/graphql",
-)
-
-_SECURITY_HEADERS = (
-    "strict-transport-security",
-    "content-security-policy",
-    "x-frame-options",
-    "x-content-type-options",
-    "referrer-policy",
-    "permissions-policy",
-    "x-xss-protection",
-)
 
 # (name, {header: regex}, [body regex]) — lightweight Wappalyzer-style sniffing.
-_TECH = (
-    ("Cloudflare", {"server": r"cloudflare"}, [r"cf-ray", r"__cf_bm"]),
-    ("CloudFront", {"server": r"cloudfront", "via": r"cloudfront"}, []),
-    ("Akamai", {"server": r"akamai", "x-akamai-transformed": r"."}, []),
-    ("Fastly", {"server": r"fastly", "x-served-by": r"cache"}, []),
-    ("Vercel", {"server": r"vercel", "x-vercel-id": r"."}, []),
-    ("Netlify", {"server": r"netlify", "x-nf-request-id": r"."}, []),
-    ("GitHub Pages", {"server": r"github\.com", "x-github-request-id": r"."}, []),
-    ("WordPress", {}, [r"wp-content/", r"wp-includes/", r'"generator"[^>]*wordpress']),
-    ("Drupal", {}, [r"drupal\.org", r'"generator"[^>]*drupal']),
-    ("Joomla", {}, [r"joomla!?", r'"generator"[^>]*joomla']),
-    ("Shopify", {"server": r"shopify"}, [r"cdn\.shopify\.com", r"myshopify\.com"]),
-    ("Magento", {"set-cookie": r"PHPSESSID"}, [r"magento", r"/skin/frontend/"]),
-    ("Wix", {"x-wix-request-id": r"."}, [r"wixstatic\.com", r"static\.wixstatic\.com"]),
-    ("Squarespace", {"server": r"squarespace"}, [r"squarespace"]),
-    ("Ghost", {"x-powered-by": r"ghost"}, [r"ghost\.io", r"ghost-url"]),
-    ("React", {}, [r"data-reactroot", r"data-reactid", r"__REACT"]),
-    ("Next.js", {}, [r"__NEXT_DATA__", r"/_next/static"]),
-    ("Vue.js", {}, [r"data-v-[0-9a-f]{6,}", r"__vue__"]),
-    ("Angular", {}, [r"ng-version=", r"ng-app="]),
-    ("jQuery", {}, [r"jquery(?:\.min)?\.js"]),
-    ("Bootstrap", {}, [r"bootstrap(?:\.min)?\.(?:css|js)"]),
-    ("Tailwind CSS", {}, [r"tailwindcss", r"tailwind\.css"]),
-    ("Google Analytics", {}, [r"google-analytics\.com/analytics\.js", r"gtag\("]),
-    ("Google Tag Manager", {}, [r"googletagmanager\.com/gtm\.js"]),
-    ("PHP", {"x-powered-by": r"php"}, []),
-    ("ASP.NET", {"x-powered-by": r"asp\.net", "x-aspnet-version": r"."}, [r"__VIEWSTATE"]),
-    ("Django", {"set-cookie": r"csrftoken"}, [r"csrfmiddlewaretoken"]),
-    ("Ruby on Rails", {"x-powered-by": r"phusion", "server": r"passenger"}, [r"csrf-param"]),
-    ("Laravel", {"set-cookie": r"laravel_session"}, []),
-    ("Express", {"x-powered-by": r"express"}, []),
-    ("Node.js", {"x-powered-by": r"node"}, []),
-    ("Nginx", {"server": r"nginx"}, []),
-    ("Apache", {"server": r"apache"}, []),
-    ("IIS", {"server": r"microsoft-iis"}, []),
-    ("OpenResty", {"server": r"openresty"}, []),
-    ("Varnish", {"server": r"varnish", "via": r"varnish"}, []),
-    ("Webflow", {"x-powered-by": r"webflow"}, [r"webflow"]),
-)
 
 
 # ─── HTTP layer ───────────────────────────────────────────
@@ -264,19 +185,6 @@ def _parse_headers_block(text):
         else:
             headers[key] = value.strip()
     return headers
-
-
-def _http_headers(url, timeout=15):
-    if _CURL:
-        try:
-            r = _sh([_CURL, "-sS", "-L", "-o", os.devnull, "-D", "-",
-                     "-A", UA, "--max-time", str(timeout), url])
-            if r.returncode == 0:
-                return _parse_headers_block(r.stdout)
-        except Exception:
-            pass
-    got = _urllib_get(url, timeout=timeout, want="headers")
-    return got[0] if got else {}
 
 
 def _http_body(url, timeout=15, limit=1_000_000):
@@ -508,371 +416,9 @@ def _wayback_cdx(host):
     return out
 
 
-def _active_brute(host, wildcard, wildcard_ip):
-    """Wordlist brute-force. gobuster preferred; native fallback when no proxy."""
-    found = set()
-    wordlist = _wordlist()
-    if _GOBUSTER:
-        out = _run(
-            ["gobuster", "dns", "-d", host, "-w", "-", "-q"]
-            + (utils._proxy_args() if utils._PROXY else []),
-            timeout=90, stdin="\n".join(wordlist),
-        )
-        found = {s.strip().lower() for s in re.findall(r"Found:\s*(\S+)", out)}
-        if wildcard and wildcard_ip:
-            found = {s for s in found if _resolve_a(s) != wildcard_ip}
-        return found
-    if utils._PROXY:
-        # In-process resolution would bypass torsocks and leak DNS — skip it.
-        return found
-
-    def _probe(word):
-        name = f"{word}.{host}"
-        ip = _resolve_a(name)
-        if not ip:
-            return None
-        if wildcard and ip == wildcard_ip:
-            return None
-        return name
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
-        for name in pool.map(_probe, wordlist):
-            if name:
-                found.add(name)
-    return found
-
-
-def _wordlist():
-    """Bundled list, or a local SecLists subdomain wordlist when available."""
-    for path in (
-        # Debian/Ubuntu, then macOS Homebrew (Apple Silicon, Intel) prefixes.
-        "/usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
-        "/opt/homebrew/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
-        "/usr/local/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
-        os.path.expanduser("~/SecLists/Discovery/DNS/subdomains-top1million-5000.txt"),
-        os.path.expanduser("~/wordlists/subdomains-top1million-5000.txt"),
-    ):
-        try:
-            if os.path.isfile(path):
-                with open(path, encoding="utf-8", errors="ignore") as f:
-                    return [ln.strip() for ln in f if ln.strip()][:5000]
-        except OSError:
-            continue
-    return _SUB_LIST
-
-
-def _axfr(host):
-    """Attempt a zone transfer from the domain's name servers."""
-    out = []
-    if not _DIG:
-        return out
-    ns_raw = _dig_short(host, "NS")
-    servers = [s.strip().rstrip(".") for s in ns_raw.split("\n") if s.strip()]
-    for ns in servers[:3]:
-        try:
-            raw = _dig_short(f"@{ns}", host, "AXFR", timeout=15)
-            for line in raw.split("\n"):
-                line = line.strip()
-                if line and not line.startswith(";") and "Transfer failed" not in line:
-                    out.append(line)
-            if out:
-                break
-        except Exception:  # noqa: S112 - skip unreachable/axis-broken nameservers
-            continue
-    return out
-
-
 # ─── fingerprinting ───────────────────────────────────────
 
-def _analyze_headers(headers):
-    """Check for common security headers; missing ones are marked explicitly."""
-    out = {}
-    for name in _SECURITY_HEADERS:
-        label = "-".join(p.title() for p in name.split("-"))
-        out[label] = headers.get(name, "missing")
-    return out
-
-
-def _extract_csp_domains(csp):
-    """Pull hostnames referenced by a Content-Security-Policy value."""
-    domains = set()
-    ignore = {"self", "none", "unsafe-inline", "unsafe-eval", "strict-dynamic",
-              "report-sample", "data", "blob", "http", "https", "ws", "wss"}
-    for m in re.findall(r"[a-zA-Z0-9*.-]+\.[a-zA-Z]{2,}", csp or ""):
-        d = m.strip().lstrip("*.").lower()
-        if d not in ignore:
-            domains.add(d)
-    return sorted(domains)
-
-
-def _analyze_cookies(headers):
-    """Summarize Set-Cookie flags; flag cookies missing Secure/HttpOnly."""
-    out = []
-    for line in headers.get("set-cookie", "").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        name = line.split("=", 1)[0]
-        low = line.lower()
-        flags = []
-        for flag in ("secure", "httponly"):
-            flags.append(f"{flag}={('yes' if flag in low else 'no')}")
-        samesite = re.search(r"samesite=([a-z]+)", low)
-        flags.append(f"samesite={samesite.group(1) if samesite else 'none'}")
-        out.append(f"{name} ({', '.join(flags)})")
-    return out
-
-
-def _detect_technologies(headers, body):
-    found = set()
-    for name, hdr_rules, body_rules in _TECH:
-        if any(re.search(pat, headers.get(h, ""), re.I) for h, pat in hdr_rules.items()):
-            found.add(name)
-            continue
-        if any(re.search(pat, body, re.I) for pat in body_rules):
-            found.add(name)
-    gen = re.search(r'<meta[^>]+name=["\']generator["\'][^>]+content=["\']([^"\']+)', body, re.I)
-    if gen:
-        found.add(f"Generator: {gen.group(1).strip()}")
-    return sorted(found)
-
-
-def _cert_cn(cert, field):
-    try:
-        for entry in cert.get(field, []):
-            for key, value in entry:
-                if key == "commonName":
-                    return value
-    except Exception:
-        pass
-    return ""
-
-
-def _tls_info(host):
-    """TLS certificate + protocol info. stdlib ssl when possible; curl -v over proxy."""
-    if utils._PROXY:
-        return _tls_info_curl(host)
-    try:
-        ctx = ssl.create_default_context()
-        with (socket.create_connection((host, 443), timeout=10) as sock,
-              ctx.wrap_socket(sock, server_hostname=host) as tls):
-            cert = tls.getpeercert()
-            if not cert:
-                return {"note": "no certificate presented"}
-            not_after = cert.get("notAfter")
-            not_before = cert.get("notBefore")
-            days_left = ""
-            if not_after:
-                try:
-                    days_left = f"{int((ssl.cert_time_to_seconds(not_after) - time.time()) / 86400)}"
-                except Exception:
-                    days_left = ""
-            sans = sorted({v for typ, v in cert.get("subjectAltName", []) if typ == "DNS"})
-            return {
-                "subject": _cert_cn(cert, "subject"),
-                "issuer": _cert_cn(cert, "issuer"),
-                "not_before": not_before,
-                "not_after": not_after,
-                "days_left": days_left,
-                "version": tls.version(),
-                "cipher": (tls.cipher() or ("",))[0],
-                "san": ", ".join(sans[:20]),
-            }
-    except Exception as exc:
-        return {"note": f"TLS probe failed: {exc}"}
-
-
-def _tls_info_curl(host):
-    if not _CURL:
-        return {"note": "TLS probe skipped (no curl)"}
-    try:
-        r = _sh([_CURL, "-sS", "-I", "-v", "-A", UA, f"https://{host}"], timeout=15)
-    except Exception as exc:
-        return {"note": f"TLS probe failed: {exc}"}
-    text = r.stderr
-    def _cn(match):
-        m = re.search(r"CN=([^;\s]+)", match.group(1))
-        return m.group(1) if m else match.group(1).strip()
-
-    out = {}
-    m = re.search(r"subject:\s*(.+)", text)
-    if m:
-        out["subject"] = _cn(m)
-    m = re.search(r"issuer:\s*(.+)", text)
-    if m:
-        out["issuer"] = _cn(m)
-    m = re.search(r"expire date:\s*(.+)", text)
-    if m:
-        out["not_after"] = m.group(1).strip()
-    m = re.search(r"SSL connection using\s*(.+)", text)
-    if m:
-        out["version"] = m.group(1).strip()
-    return out or {"note": "no TLS data returned"}
-
-
-def _favicon(host, body):
-    out = {}
-    m = re.search(r'<link[^>]+rel=["\'](?:shortcut )?icon["\'][^>]+href=["\']([^"\']+)', body, re.I)
-    href = m.group(1) if m else "/favicon.ico"
-    low = href.strip().lower()
-    if low.startswith(("data:", "javascript:", "about:", "blob:")) or low in ("", "#"):
-        href = "/favicon.ico"
-    if href.startswith("//"):
-        url = "https:" + href
-    elif href.startswith(("http://", "https://")):
-        url = href
-    else:
-        url = "https://" + host + (href if href.startswith("/") else "/" + href)
-    raw = _http_bytes(url)
-    if not raw or not _looks_like_image(raw):
-        return out
-    out["url"] = url
-    out["size"] = len(raw)
-    out["sha256"] = hashlib.sha256(raw).hexdigest()[:16]
-    out["mmh3"] = _murmur3_32(base64.b64encode(raw))
-    return out
-
-
-def _looks_like_image(raw):
-    """Reject HTML/plain-text bodies so 404 pages are not hashed as icons."""
-    head = raw[:16].lstrip()
-    if head.startswith((b"<html", b"<!doctype", b"<head", b"<body")):
-        return False
-    if raw[:8] == b"\x89PNG\r\n\x1a\n":        # PNG
-        return True
-    if raw[:4] == b"\x00\x00\x01\x00":          # ICO
-        return True
-    if raw[:3] == b"\xff\xd8\xff":              # JPEG
-        return True
-    if raw[:6] in (b"GIF87a", b"GIF89a"):       # GIF
-        return True
-    if head.startswith(b"<svg") or head.startswith(b"<?xml"):  # SVG
-        return True
-    return raw[:2] == b"BM"                       # BMP
-
-
-def _murmur3_32(data, seed=0):
-    """MurmurHash3 x86_32 (Shodan favicon-hash compatible)."""
-    data = bytes(data)
-    c1, c2 = 0xCC9E2D51, 0x1B873593
-    length = len(data)
-    h1 = seed & 0xFFFFFFFF
-    rounded = length & 0xFFFFFFFC
-    for i in range(0, rounded, 4):
-        k1 = data[i] | (data[i + 1] << 8) | (data[i + 2] << 16) | (data[i + 3] << 24)
-        k1 &= 0xFFFFFFFF
-        k1 = (k1 * c1) & 0xFFFFFFFF
-        k1 = ((k1 << 15) | (k1 >> 17)) & 0xFFFFFFFF
-        k1 = (k1 * c2) & 0xFFFFFFFF
-        h1 ^= k1
-        h1 = ((h1 << 13) | (h1 >> 19)) & 0xFFFFFFFF
-        h1 = (h1 * 5 + 0xE6546B64) & 0xFFFFFFFF
-    k1 = 0
-    tail = length & 3
-    if tail >= 3:
-        k1 ^= data[rounded + 2] << 16
-    if tail >= 2:
-        k1 ^= data[rounded + 1] << 8
-    if tail >= 1:
-        k1 ^= data[rounded]
-        k1 = (k1 * c1) & 0xFFFFFFFF
-        k1 = ((k1 << 15) | (k1 >> 17)) & 0xFFFFFFFF
-        k1 = (k1 * c2) & 0xFFFFFFFF
-        h1 ^= k1
-    h1 ^= length
-    h1 ^= h1 >> 16
-    h1 = (h1 * 0x85EBCA6B) & 0xFFFFFFFF
-    h1 ^= h1 >> 13
-    h1 = (h1 * 0xC2B2AE35) & 0xFFFFFFFF
-    h1 ^= h1 >> 16
-    return h1 & 0xFFFFFFFF
-
-
 # ─── content discovery ────────────────────────────────────
-
-def _parse_robots(body):
-    """Extract Disallow/Allow/Sitemap directives from robots.txt."""
-    out = []
-    for line in body.splitlines():
-        line = line.strip()
-        m = re.match(r"^\s*(User-agent|Disallow|Allow|Sitemap|Crawl-delay)\s*:\s*(.+)\s*$", line, re.I)
-        if m:
-            out.append(f"{m.group(1).title()}: {m.group(2).strip()}")
-    return out
-
-
-def _parse_sitemap(xml):
-    """Extract <loc> URLs from a sitemap XML body."""
-    return re.findall(r"<loc>\s*([^<]+?)\s*</loc>", xml)[:200]
-
-
-def _extract_js_endpoints(body):
-    """Pull URL/path-like strings out of JavaScript source."""
-    endpoints = set()
-    endpoints.update(re.findall(
-        r'''["'`](/(?:api|v[0-9]|graphql|wp-json|rest|admin|internal|static|assets|ajax)(?:/[A-Za-z0-9_./?=&-]*)?)["'`]''',
-        body,
-    ))
-    endpoints.update(re.findall(r"https?://[A-Za-z0-9.-]+/[A-Za-z0-9_./?=&%-]*", body))
-    return sorted(endpoints)[:100]
-
-
-_JS_SECRET_KEYS = (
-    "api_key", "api-key", "apikey", "access_token", "accessToken", "auth_token",
-    "secret", "client_secret", "private_key", "password", "passwd",
-    "authorization", "bearer", "aws_access_key_id", "aws_secret_access_key",
-    "google_api_key", "stripe_secret_key", "slack_token", "openai_api_key",
-)
-
-
-def _extract_js_interesting(body):
-    """Flag likely secrets/tokens left in JavaScript."""
-    hits = set()
-    for key in _JS_SECRET_KEYS:
-        for m in re.findall(rf"[\"']?{re.escape(key)}[\"']?\s*[:=]\s*[\"'][^\"']{{4,}}[\"']", body, re.I):
-            hits.add(m[:80])
-    return sorted(hits)[:50]
-
-
-def _exposure_checks(host, timeout=10):
-    """Probe well-known sensitive paths without following redirects.
-
-    A 301/302 to a catch-all homepage must not count as "exposed"; only the
-    direct status is reported, and 404s are dropped.
-    """
-    found = []
-    base = f"https://{host}"
-    interesting = {200, 301, 302, 401, 403}
-
-    def _probe(path):
-        code = _http_status(base + path, timeout=timeout, follow=False)
-        return f"{path} ({code})" if code in interesting else None
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
-        for item in pool.map(_probe, _EXPOSURE_PATHS):
-            if item:
-                found.append(item)
-    return found
-
-
-def _js_files(body, host):
-    """Collect same-origin .js URLs referenced by an HTML page."""
-    urls = set()
-    for src in re.findall(r'<script[^>]+src=["\']([^"\']+)', body):
-        src = src.strip()
-        if src.startswith("//"):
-            src = "https:" + src
-        elif src.startswith("/"):
-            src = f"https://{host}{src}"
-        elif not src.startswith("http"):
-            src = f"https://{host}/{src}"
-        if not src.endswith(".js"):
-            continue
-        parsed = urllib.parse.urlparse(src)
-        h = (parsed.hostname or "").lower()
-        if h == host or h.endswith("." + host):
-            urls.add(src)
-    return sorted(urls)[:10]
 
 
 # ─── DNS email security ───────────────────────────────────
@@ -967,12 +513,6 @@ def _phase_dns(host):
                                   "resolves_to": wild_ip or ""}
     except Exception:
         pass
-    try:
-        axfr = _axfr(host)
-        if axfr:
-            result["zone_transfer"] = axfr[:200]
-    except Exception:
-        pass
     result["_ips"] = ips
     result["_wild"] = wild
     result["_wild_ip"] = wild_ip
@@ -1004,97 +544,6 @@ def _phase_passive_subs(host):
     result["_sources"] = sources
     result["_crt"] = crt
     result["_wb"] = wb
-    return result
-
-
-def _phase_fingerprint(host, headers, body):
-    """HTTP headers, security headers, cookies, CSP, tech, favicon, TLS."""
-    result = {}
-    if headers:
-        server_bits = []
-        if headers.get("server"):
-            server_bits.append(f"Server: {headers['server']}")
-        if headers.get("x-powered-by"):
-            server_bits.append(f"X-Powered-By: {headers['x-powered-by']}")
-        if server_bits:
-            result["http_headers"] = {"Summary": " | ".join(server_bits)}
-    try:
-        sec = _analyze_headers(headers)
-        if sec:
-            result["security_headers"] = sec
-    except Exception:
-        pass
-    try:
-        cookies = _analyze_cookies(headers)
-        if cookies:
-            result["cookies"] = cookies
-    except Exception:
-        pass
-    try:
-        csp = headers.get("content-security-policy")
-        if csp:
-            domains = _extract_csp_domains(csp)
-            if domains:
-                result["csp_domains"] = domains
-    except Exception:
-        pass
-    try:
-        tech = _detect_technologies(headers, body)
-        if tech:
-            result["technologies"] = tech
-    except Exception:
-        pass
-    try:
-        fav = _favicon(host, body)
-        if fav.get("mmh3") is not None:
-            result["favicon"] = fav
-    except Exception:
-        pass
-    try:
-        tls = _tls_info(host)
-        if tls:
-            result["tls"] = tls
-    except Exception:
-        pass
-    return result
-
-
-def _phase_content(host, body):
-    """robots.txt, sitemap, exposed files, JS endpoints & secrets."""
-    result = {}
-    robots_body = _http_body(f"https://{host}/robots.txt")
-    try:
-        robots = _parse_robots(robots_body)
-        if robots:
-            result["robots"] = robots
-    except Exception:
-        pass
-    try:
-        sm = _http_body(f"https://{host}/sitemap.xml")
-        locs = _parse_sitemap(sm)
-        if locs:
-            result["sitemap"] = locs
-    except Exception:
-        pass
-    try:
-        exposure = _exposure_checks(host)
-        if exposure:
-            result["interesting_files"] = exposure
-    except Exception:
-        pass
-    try:
-        endpoints, interesting = set(), set()
-        for js_url in _js_files(body, host):
-            js = _http_body(js_url, timeout=12, limit=400_000)
-            if js:
-                endpoints.update(_extract_js_endpoints(js))
-                interesting.update(_extract_js_interesting(js))
-        if endpoints:
-            result["js_endpoints"] = sorted(endpoints)[:100]
-        if interesting:
-            result["js_interesting"] = sorted(interesting)[:50]
-    except Exception:
-        pass
     return result
 
 
@@ -1131,31 +580,8 @@ def _phase_whois(host):
     return result
 
 
-def _phase_dirs(host):
-    """Directory brute-force (gobuster, SecLists wordlist when available)."""
-    result = {}
-    if _check_tool("gobuster", _GOBUSTER):
-        wordlist = _dir_wordlist()
-        gb_out = _run(
-            ["gobuster", "dir", "-u", f"https://{host}", "-w", "-", "-q", "-t", "20", "-k"]
-            + (utils._proxy_args() if utils._PROXY else []),
-            timeout=120, stdin="\n".join(wordlist),
-        )
-        dirs = sorted(set(re.findall(r"/(\S+)\s+\(Status:\s*\d+\)", gb_out)))
-        if dirs:
-            result["directories"] = dirs
-    return result
-
-
-def _phase_active_brute(host, wild, wild_ip):
-    try:
-        return _active_brute(host, wild, wild_ip)
-    except Exception:
-        return set()
-
-
 def _phase_shodan_ports(ips):
-    """Shodan + nmap port scan + reverse DNS + adjacent-host sweep."""
+    """Shodan host data + reverse DNS. Both read third-party sources."""
     result = {}
     if ips and _check_tool("shodan", _SHODAN):
         shodan_data = []
@@ -1194,27 +620,6 @@ def _phase_shodan_ports(ips):
                 shodan_data.append(f"{ip}: No Shodan data")
         result["shodan"] = shodan_data
 
-    if ips and _check_tool("nmap", _NMAP):
-        ports_data = []
-        for ip in ips[:1]:
-            nm = _run(["nmap", "--top-ports", "50", "-sV", "-T4", "--open",
-                       ip, "-oG", "-"], timeout=90)
-            ports = re.findall(r"(\d+)/(open|filtered)/tcp//([^/]*?)//([^/]*?)", nm)
-            if ports:
-                parts = []
-                for p, _st, sv, pr in ports:
-                    if pr:
-                        parts.append(f"{p}/{sv} ({pr})")
-                    elif sv:
-                        parts.append(f"{p}/{sv}")
-                    else:
-                        parts.append(p)
-                ports_data.append(f"{ip}: {', '.join(parts)}")
-            else:
-                ports_data.append(f"{ip}: No open ports found")
-        if ports_data:
-            result["port_scan"] = ports_data
-
     if ips:
         try:
             rdns = []
@@ -1224,13 +629,6 @@ def _phase_shodan_ports(ips):
                     rdns.append(f"{ip} -> {name}")
             if rdns:
                 result["reverse_dns"] = rdns
-            # Adjacent-host sweep only when DNS is not going through a proxy.
-            if not utils._PROXY and ips:
-                v4 = next((ip for ip in ips if _is_ipv4(ip)), None)
-                if v4:
-                    sweep = _ptr_sweep(v4)
-                    if sweep:
-                        result["ptr_sweep"] = sweep
         except Exception:
             pass
     return result
@@ -1241,50 +639,34 @@ def _collect(target):
     _reset_caches()
     result = {}
 
-    # Homepage fetched once and shared by the fingerprint + content phases.
-    headers = _http_headers(f"https://{host}")
-    body = _http_body(f"https://{host}")
-
-    # Stage 1 — independent phases run concurrently.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+    # Every phase here reads third-party sources (DNS, Certificate Transparency,
+    # WHOIS registries, Shodan). Nothing in this module opens a connection to
+    # the target: no page fetch, no port scan, no brute force. See the
+    # "Passive-only" note in the module docstring.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         dns_f = pool.submit(_phase_dns, host)
         subs_f = pool.submit(_phase_passive_subs, host)
-        fp_f = pool.submit(_phase_fingerprint, host, headers, body)
-        content_f = pool.submit(_phase_content, host, body)
         whois_f = pool.submit(_phase_whois, host)
-        dirs_f = pool.submit(_phase_dirs, host)
         dns = _future_result(dns_f, {})
         subs = _future_result(subs_f, {})
-        fp = _future_result(fp_f, {})
-        content = _future_result(content_f, {})
         whois = _future_result(whois_f, {})
-        dirs = _future_result(dirs_f, {})
 
-    for phase in (dns, subs, fp, content, whois, dirs):
+    for phase in (dns, subs, whois):
         for key, value in phase.items():
             if not key.startswith("_"):
                 result[key] = value
 
-    # State the dependent phases need.
+    # State the dependent phase needs.
     ips = sorted(set(dns.get("_ips", set())) | set(subs.get("_passive_ips", set())))
-    wild = dns.get("_wild", False)
-    wild_ip = dns.get("_wild_ip")
 
-    # Stage 2 — active brute + port scan depend on stage-1 state.
-    active = set()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        active_f = pool.submit(_phase_active_brute, host, wild, wild_ip)
-        scan_f = pool.submit(_phase_shodan_ports, ips)
-        active = _future_result(active_f, set())
-        scan = _future_result(scan_f, {})
+    scan = _phase_shodan_ports(ips)
     for key, value in scan.items():
         result[key] = value
 
-    # Subdomain assembly (passive + active).
+    # Subdomain assembly — passive sources only.
     passive_subs = subs.get("_passive_subs", set())
     sources = dict(subs.get("_sources", {}))
-    sources["active"] = len(active)
-    all_subs = sorted(passive_subs | active)
+    all_subs = sorted(passive_subs)
     if all_subs:
         result["subdomains"] = all_subs
         result["subdomain_sources"] = sources
@@ -1294,22 +676,6 @@ def _collect(target):
     wb = subs.get("_wb", {})
     if wb.get("subs"):
         result["wayback_subdomains"] = sorted(wb["subs"])
-
-    # Stage 3 — httpx probing of all discovered subdomains.
-    if all_subs and _HTPPX:
-        try:
-            hx = _run(
-                ["httpx", "-silent", "-status-code", "-title", "-server",
-                 "-content-length", "-timeout", "10",
-                 *[f"https://{s}" for s in all_subs][:200]],
-                timeout=90,
-            )
-            if hx and "Usage:" not in hx and "No such option" not in hx:
-                probe = [ln.strip() for ln in hx.split("\n") if ln.strip()]
-                if probe:
-                    result["http_probe"] = probe
-        except Exception:
-            pass
 
     # Wayback history (from the CDX call in stage 1).
     if wb.get("first"):
@@ -1321,30 +687,3 @@ def _collect(target):
 
     return result
 
-
-def _ptr_sweep(ip, window=32, max_hosts=40):
-    """Reverse-resolve adjacent hosts in the same /24 (shared hosting signal)."""
-    try:
-        octets = ip.split(".")
-        prefix = ".".join(octets[:3])
-        n = int(octets[3])
-    except Exception:
-        return []
-    found = []
-    lo, hi = max(1, n - window), min(254, n + window)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
-        def _probe(last):
-            addr = f"{prefix}.{last}"
-            if addr == ip:
-                return None
-            try:
-                name = socket.gethostbyaddr(addr)[0]
-                return f"{addr} -> {name}" if name else None
-            except Exception:
-                return None
-        for item in pool.map(_probe, range(lo, hi + 1)):
-            if item:
-                found.append(item)
-                if len(found) >= max_hosts:
-                    break
-    return found

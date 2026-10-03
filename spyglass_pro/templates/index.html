@@ -248,7 +248,7 @@
     <!-- IP Panel -->
     <section class="panel" id="panel-ip">
       <h2>IP Address</h2>
-      <p class="panel-desc">Long-range IP reconnaissance. Passive-first deep intel, optional active nmap scan.</p>
+      <p class="panel-desc">Long-range IP reconnaissance. Passive only — Shodan, InternetDB, RDAP, RIPEstat, GreyNoise and DNSBL. Nothing connects to the target.</p>
       <form class="module-form" id="form-ip" data-api="lens" data-target="lensTarget" data-results="lensResults">
         <div class="form-row">
           <label for="lensTarget">IP Address or Domain</label>
@@ -258,15 +258,9 @@
           <label>Options</label>
           <div class="checkbox-row">
             <label><input type="checkbox" data-flag="passive" checked /> Passive Recon</label>
-            <label><input type="checkbox" data-flag="active" id="lensActive" /> Active nmap Scan</label>
-            <label><input type="checkbox" data-flag="tor" /> Route via Tor</label>
             <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
             <label><input type="checkbox" data-flag="alsoSpyglass" id="ipAlsoSpyglass" /> Also run OSINT IP recon</label>
           </div>
-        </div>
-        <div class="form-row" id="lensPortsRow" style="display:none;">
-          <label for="lensPorts">Port Spec</label>
-          <input type="text" id="lensPorts" placeholder="top1000" value="top1000" data-flag-input="ports" />
         </div>
         <button type="submit" class="btn btn-primary run-btn">Run IP Recon</button>
       </form>

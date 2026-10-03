@@ -14,9 +14,9 @@ from .harness import collect
 from .registry import Platform, all_platforms, describe, get
 
 __all__ = [
-    "collect",
     "Platform",
     "all_platforms",
+    "collect",
     "describe",
     "get",
     "registry",

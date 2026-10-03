@@ -76,6 +76,7 @@ class RegistryTest(unittest.TestCase):
     def test_a_broken_adapter_does_not_hide_the_others(self):
         """One adapter failing to import must not empty the registry."""
         from unittest import mock
+
         import spyglass_pro.social.registry as reg
 
         saved_registry, saved_loaded = dict(reg._REGISTRY), reg._LOADED
@@ -239,6 +240,7 @@ class XApiV2NormalizeTest(unittest.TestCase):
     def test_no_token_means_the_official_path_is_skipped(self):
         import os
         from unittest import mock
+
         from spyglass_pro.social.platforms import x as xmod
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("SPYGLASS_X_TOKEN", None)

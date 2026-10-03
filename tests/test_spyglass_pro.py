@@ -140,6 +140,7 @@ class StoredRunFeedbackTest(unittest.TestCase):
             os.environ, {"SPYGLASS_HOME": self._tmp.name})
         self._env.start()
         import pathlib as _pathlib
+
         import lens_extender.store as le_store
         self._lens = mock.patch.multiple(
             le_store,
@@ -160,7 +161,8 @@ class StoredRunFeedbackTest(unittest.TestCase):
         self.assertEqual(result["stored_run_id"], 1)
 
     def test_lens_run_reports_stored_run_id(self):
-        from lens_extender import analyzer, osint as le_osint
+        from lens_extender import analyzer
+        from lens_extender import osint as le_osint
 
         class FakeResult:
             resolved_ip = "1.1.1.1"

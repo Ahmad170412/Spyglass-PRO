@@ -1,6 +1,6 @@
+import importlib
 import os
 import secrets
-import importlib
 import shutil
 from urllib.parse import urlparse
 
@@ -21,6 +21,10 @@ _PROXY_SCHEMES = {"http", "https", "socks4", "socks4a", "socks5", "socks5h"}
 
 # Optional CLI tools the engines shell out to. blackbird ships as a script,
 # hence the two-name lookup. Keep in sync with spyglass_osint.utils.
+#
+# No scanners appear here: nmap, gobuster and httpx were removed from the
+# engines, and nothing in this application opens a connection to a target.
+# If you find yourself adding one back, it belongs in Spyglass-Crimson.
 _TOOL_PROBES = {
     "holehe": ("holehe",),
     "user-scanner": ("user-scanner",),
@@ -31,9 +35,6 @@ _TOOL_PROBES = {
     "phoneinfoga": ("phoneinfoga",),
     "dig": ("dig",),
     "whois": ("whois",),
-    "httpx": ("httpx",),
-    "gobuster": ("gobuster",),
-    "nmap": ("nmap",),
     "shodan": ("shodan",),
     "exiftool": ("exiftool",),
     "curl": ("curl",),
@@ -145,8 +146,8 @@ def _degraded(tools):
         "email": ["holehe", "user-scanner", "blackbird"],
         "username": ["user-scanner", "sherlock", "maigret", "blackbird"],
         "phone": ["ignorant", "phoneinfoga"],
-        "website": ["dig", "whois", "httpx", "gobuster"],
-        "ip": ["nmap", "shodan"],
+        "website": ["dig", "whois", "curl"],
+        "ip": ["shodan"],
         "metadata": ["exiftool"],
     }
     return {qtype: [tool for tool in needed if not tools.get(tool)]

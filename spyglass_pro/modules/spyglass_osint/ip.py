@@ -1,14 +1,18 @@
+"""IP address reconnaissance — PASSIVE ONLY.
+
+Resolves the address and reads third-party sources: WHOIS registries,
+Shodan, reverse DNS. It does not port scan. The nmap scan this module used
+to run on every call was removed rather than switched off, so nothing here
+opens a connection to the host.
+"""
+
 import re
 import socket
 
-from .utils import _NMAP, _SHODAN, _WHOIS, _check_tool, _curl_json, _run
-
-_COMMON_PORTS = [21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445,
-                 993, 995, 1433, 1521, 2049, 3306, 3389, 5432, 5900, 5985,
-                 5986, 6379, 8080, 8443, 9090, 27017]
+from .utils import _SHODAN, _WHOIS, _check_tool, _curl_json, _run
 
 
-def address(target, top_ports=None):
+def address(target):
     target = target.strip()
     ip = _resolve(target)
     if not ip:
@@ -38,10 +42,6 @@ def address(target, top_ports=None):
         sd = _shodan_lookup(ip)
         if sd:
             r["shodan"] = sd
-
-    ports = _port_scan(ip, top_ports)
-    if ports:
-        r["open_ports"] = ports
 
     return r
 
@@ -140,24 +140,3 @@ def _shodan_lookup(ip):
         sd["hostnames"] = sorted(hostnames)[:10]
     return sd if sd else None
 
-
-def _port_scan(ip, top_ports=None):
-    if not _check_tool("nmap", _NMAP):
-        return None
-    if top_ports:
-        port_args = ["--top-ports", str(top_ports)]
-    else:
-        ports_str = ",".join(str(p) for p in _COMMON_PORTS)
-        port_args = ["-p", ports_str]
-    out = _run(
-        ["nmap", "-Pn", "-n", "--open", "-T4", *port_args, "--min-rate", "1000", ip],
-        timeout=120,
-    )
-    if not out:
-        return None
-    found = []
-    for line in out.splitlines():
-        m = re.match(r"^(\d+)/tcp\s+open", line)
-        if m:
-            found.append(int(m.group(1)))
-    return found if found else None

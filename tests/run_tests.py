@@ -18,7 +18,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR))
 sys.path.insert(0, str(TESTS_DIR.parents[0] / "spyglass_pro" / "modules"))
 
-import helpers  # noqa: E402,F401  — sets up sys.path for the vendored engines
+import helpers  # noqa: F401  — sets up sys.path for the vendored engines
 
 
 def run_unittest_modules():
@@ -40,7 +40,7 @@ def run_instacloak():
         try:
             fn()
             print(f"  [PASS] {name}")
-        except Exception as exc:  # noqa: BLE001 — report, don't abort
+        except Exception as exc:
             print(f"  [FAIL] {name}: {exc}")
             failed.append(name)
     return len(fns), len(failed)

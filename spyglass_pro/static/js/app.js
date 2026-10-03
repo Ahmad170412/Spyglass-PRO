@@ -70,15 +70,6 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  /* ── IP panel: active scan reveals port spec ── */
-  var lensActive = document.getElementById('lensActive');
-  var lensPortsRow = document.getElementById('lensPortsRow');
-  if (lensActive && lensPortsRow) {
-    lensActive.addEventListener('change', function () {
-      lensPortsRow.style.display = lensActive.checked ? 'block' : 'none';
-    });
-  }
-
   /* ── Proxy ── */
   var proxyInput = document.getElementById('proxyInput');
   var proxyApply = document.getElementById('proxyApply');
@@ -537,7 +528,10 @@ var RENDERERS = [
     render: renderUsername },
   { name: 'email',      matches: function (d) { return d.user_scanner_only !== undefined; },
     render: renderEmail },
-  { name: 'ip',         matches: function (d) { return Array.isArray(d.open_ports); },
+  /* Matched on geo/hostname/a_records: open_ports went with the nmap scan,
+     so keying on it meant this renderer never fired. */
+  { name: 'ip',         matches: function (d) {
+      return d.geo !== undefined || d.hostname !== undefined || d.a_records !== undefined; },
     render: renderSpyglassIp }
 ];
 
@@ -872,18 +866,10 @@ function renderWebsite(d) {
   }
   if (d.dns) html += renderSection('DNS', renderKv(d.dns));
   if (d.whois) html += renderSection('WHOIS', renderKv(d.whois));
-  if (d.headers) html += renderSection('Response headers', renderKv(d.headers));
-  if (Array.isArray(d.technologies) && d.technologies.length) {
-    html += renderSection('Technologies', renderChips(d.technologies));
-  }
-  if (Array.isArray(d.ports) && d.ports.length) {
-    html += renderSection('Open ports', renderChips(d.ports));
-  }
-  if (Array.isArray(d.directories) && d.directories.length) {
-    html += renderSection('Interesting paths', renderChips(d.directories));
-  }
+  if (d.shodan) html += renderSection('Shodan', renderKv(d.shodan));
   html += renderGeneric(d, ['title', 'status_code', 'subdomains', 'dns', 'whois',
-                            'headers', 'technologies', 'ports', 'directories']);
+                            'shodan', 'dns_records', 'wildcard_dns',
+                            'dns_email_security', 'history']);
   return html;
 }
 
@@ -892,11 +878,20 @@ function renderSpyglassIp(d) {
   var html = '';
   if (d.geo) html += renderSection('GeoIP', renderKv(d.geo));
   if (d.whois) html += renderSection('WHOIS', renderKv(d.whois));
-  if (Array.isArray(d.open_ports) && d.open_ports.length) {
-    html += renderSection('Open ports (' + d.open_ports.length + ')', renderChips(d.open_ports));
+  if (d.hostname) html += renderSection('Reverse DNS', renderKv({hostname: d.hostname}));
+  if (Array.isArray(d.a_records) && d.a_records.length) {
+    html += renderSection('A records', renderChips(d.a_records));
   }
-  if (d.reverse_dns) html += renderStatusLine('Reverse DNS', d.reverse_dns, true);
-  html += renderGeneric(d, ['geo', 'whois', 'open_ports', 'reverse_dns']);
+  if (d.shodan) {
+    var ports = Array.isArray(d.shodan.ports) ? d.shodan.ports : null;
+    if (ports && ports.length) {
+      html += renderSection('Open ports (Shodan)', renderChips(ports));
+    }
+    if (d.shodan.hostnames) {
+      html += renderSection('Hostnames (Shodan)', renderChips(d.shodan.hostnames));
+    }
+  }
+  html += renderGeneric(d, ['geo', 'whois', 'hostname', 'a_records', 'shodan', 'ip']);
   return html;
 }
 

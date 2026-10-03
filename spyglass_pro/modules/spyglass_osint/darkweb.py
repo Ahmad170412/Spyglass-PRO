@@ -266,7 +266,8 @@ def pwned_password(password):
         return {"pwned": False, "count": 0, "error": "no password given"}
     if not utils._CURL:
         return {"pwned": False, "count": 0, "error": "curl not found"}
-    digest = hashlib.sha1(password.encode("utf-8")).hexdigest().upper()
+    # SHA-1 is mandated by the HIBP k-anonymity range API.
+    digest = hashlib.sha1(password.encode("utf-8")).hexdigest().upper()  # noqa: S324
     prefix, suffix = digest[:5], digest[5:]
     cmd = [utils._CURL, "-s", "-A", UA, f"{_PWNED_RANGE}{prefix}"]
     if utils._PROXY:
