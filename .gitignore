@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.ruff_cache/
+.mypy_cache/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Runtime artifacts: recon output, case stores, logs
+logs/
+reports/
+output/
+*.db
+*.sqlite
+*.log
+
+# Local engine config — may hold burner credentials / proxy secrets
+config.toml
+
+# OS / editor
+.DS_Store
+*.swp

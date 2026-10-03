@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spyglass-Pro — Unified OSINT Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- Top Bar -->
+<header class="topbar">
+  <div class="topbar-left">
+    <h1>Spyglass-<span class="pro">Pro</span></h1>
+    <span class="badge">v{{ version }}</span>
+  </div>
+  <div class="topbar-right">
+    <div class="proxy-status" id="proxyStatus">
+      <span class="dot idle"></span>
+      <span class="proxy-label">No Proxy</span>
+    </div>
+    <div class="module-tags" id="moduleTags">
+      <span class="mod-tag" title="Spyglass-OSINT" data-mod="spyglass">OSINT</span>
+      <span class="mod-tag" title="InstaCloak" data-mod="instacloak">INSTA</span>
+      <span class="mod-tag" title="Lens-Extender" data-mod="lens_extender">LENS</span>
+    </div>
+  </div>
+</header>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar" id="sidebar">
+    <ul>
+      <li class="nav-group">Home</li>
+      <li class="nav-item active" data-panel="dashboard"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>Overview</li>
+
+      <li class="nav-group">Identity</li>
+      <li class="nav-item" data-panel="email"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg></span>Email</li>
+      <li class="nav-item" data-panel="username"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>Username</li>
+      <li class="nav-item" data-panel="phone"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>Phone Number</li>
+      <li class="nav-item" data-panel="instagram"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></span>Instagram</li>
+      <li class="nav-item" data-panel="darkweb"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>Dark Web</li>
+
+      <li class="nav-group">Infrastructure</li>
+      <li class="nav-item" data-panel="website"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>Website</li>
+      <li class="nav-item" data-panel="ip"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></span>IP Address</li>
+
+      <li class="nav-group">Investigation</li>
+      <li class="nav-item" data-panel="investigate"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></span>Full Investigation</li>
+
+      <li class="nav-group">Utilities</li>
+      <li class="nav-item" data-panel="metadata"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>Metadata</li>
+      <li class="nav-item" data-panel="opsec"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>OPSEC Check</li>
+
+      <li class="nav-group">Cases</li>
+      <li class="nav-item" data-panel="cases"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>Stored Cases</li>
+    </ul>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="main" id="mainContent">
+
+    <!-- Overview Panel -->
+    <section class="panel active" id="panel-dashboard">
+      <h2>Spyglass-Pro</h2>
+      <p class="panel-desc">Unified OSINT dashboard. Pick a data type and run recon — results correlate across every source.</p>
+      <div class="dash-quick">
+        <h3>Quick Proxy Setup</h3>
+        <div class="proxy-form">
+          <input type="text" id="proxyInput" placeholder="socks5://127.0.0.1:9050 or http://user:pass@host:port" />
+          <button id="proxyApply" class="btn btn-sm btn-primary">Apply</button>
+          <button id="proxyClear" class="btn btn-sm btn-outline">Clear</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Email Panel -->
+    <section class="panel" id="panel-email">
+      <h2>Email</h2>
+      <p class="panel-desc">Check an email against breach databases, account registrations, and provider hints.</p>
+      <form class="module-form" id="form-email" data-api="spyglass" data-qtype="email" data-target="emailTarget" data-results="emailResults">
+        <div class="form-row">
+          <label for="emailTarget">Email Address</label>
+          <input type="text" id="emailTarget" placeholder="user@example.com" />
+        </div>
+        <div class="form-row">
+          <label>Export</label>
+          <div class="checkbox-row">
+            <label><input type="checkbox" data-flag="json" /> JSON</label>
+            <label><input type="checkbox" data-flag="csv" /> CSV</label>
+            <label><input type="checkbox" data-flag="report" /> Markdown Report</label>
+            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Run Email Recon</button>
+      </form>
+      <div id="emailResults" class="results-area"></div>
+    </section>
+
+    <!-- Username Panel -->
+    <section class="panel" id="panel-username">
+      <h2>Username</h2>
+      <p class="panel-desc">Search a username across 400+ platforms with multiple lookup engines.</p>
+      <form class="module-form" id="form-username" data-api="spyglass" data-qtype="username" data-target="usernameTarget" data-results="usernameResults">
+        <div class="form-row">
+          <label for="usernameTarget">Username</label>
+          <input type="text" id="usernameTarget" placeholder="johndoe" />
+        </div>
+        <div class="form-row">
+          <label>Export</label>
+          <div class="checkbox-row">
+            <label><input type="checkbox" data-flag="json" /> JSON</label>
+            <label><input type="checkbox" data-flag="csv" /> CSV</label>
+            <label><input type="checkbox" data-flag="report" /> Markdown Report</label>
+            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Run Username Search</button>
+      </form>
+      <div id="usernameResults" class="results-area"></div>
+    </section>
+
+    <!-- Phone Panel -->
+    <section class="panel" id="panel-phone">
+      <h2>Phone Number</h2>
+      <p class="panel-desc">Validate and footprint a phone number. Country code required, e.g. +1234567890.</p>
+      <form class="module-form" id="form-phone" data-api="spyglass" data-qtype="phone" data-target="phoneTarget" data-results="phoneResults">
+        <div class="form-row">
+          <label for="phoneTarget">Phone Number</label>
+          <input type="text" id="phoneTarget" placeholder="+1234567890" />
+        </div>
+        <div class="form-row">
+          <label>Export</label>
+          <div class="checkbox-row">
+            <label><input type="checkbox" data-flag="json" /> JSON</label>
+            <label><input type="checkbox" data-flag="csv" /> CSV</label>
+            <label><input type="checkbox" data-flag="report" /> Markdown Report</label>
+            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Run Phone Investigation</button>
+      </form>
+      <div id="phoneResults" class="results-area"></div>
+    </section>
+
+    <!-- Instagram Panel -->
+    <section class="panel" id="panel-instagram">
+      <h2>Instagram</h2>
+      <p class="panel-desc">Stealth Instagram recon through a humanized browser. Profile, posts, contacts, social graph. Basic runs work logged-out; enable the optional burner login for advanced social-graph recon.</p>
+      <form class="module-form" id="form-instagram" data-api="instacloak" data-target="instaUsername" data-results="instaResults">
+        <div class="form-row">
+          <label for="instaUsername">Instagram Username</label>
+          <input type="text" id="instaUsername" placeholder="instagram" />
+        </div>
+        <div class="form-row">
+          <label>Options</label>
+          <div class="checkbox-row">
+            <label><input type="checkbox" data-flag="headless" checked /> Headless</label>
+            <label><input type="checkbox" data-flag="deep" /> Deep (HD propic + highlights)</label>
+            <label><input type="checkbox" data-flag="media" checked /> Download Media</label>
+            <label><input type="checkbox" data-flag="followers" checked /> Attempt Followers</label>
+            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+          </div>
+        </div>
+        <div class="form-row burner-row">
+          <label>Burner Account (optional)</label>
+          <div class="checkbox-row">
+            <label><input type="checkbox" id="burnerEnabled" /> Use burner login — unlocks follower/following lists + stories</label>
+          </div>
+          <input type="text" id="burnerUser" placeholder="burner username" autocomplete="off" />
+          <input type="password" id="burnerPass" placeholder="burner password" autocomplete="new-password" />
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Run Instagram Recon</button>
+      </form>
+      <div id="instaResults" class="results-area"></div>
+    </section>
+
+    <!-- Dark Web Panel -->
+    <section class="panel" id="panel-darkweb">
+      <h2>Dark Web</h2>
+      <p class="panel-desc">.onion index search (Ahmia) and breach checks across email, username, phone, domain, or IP.</p>
+      <form class="module-form" id="form-darkweb" data-api="spyglass" data-qtype="darkweb" data-target="darkwebTarget" data-results="darkwebResults">
+        <div class="form-row">
+          <label for="darkwebTarget">Query</label>
+          <input type="text" id="darkwebTarget" placeholder="user@example.com" />
+        </div>
+        <div class="form-row">
+          <label for="darkwebType">Data Type Hint</label>
+          <select id="darkwebType" data-flag="type">
+            <option value="">Auto-detect</option>
+            <option value="email">Email</option>
+            <option value="username">Username</option>
+            <option value="phone">Phone</option>
+            <option value="domain">Domain</option>
+            <option value="ip">IP</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Export</label>
+          <div class="checkbox-row">
+            <label><input type="checkbox" data-flag="json" /> JSON</label>
+            <label><input type="checkbox" data-flag="csv" /> CSV</label>
+            <label><input type="checkbox" data-flag="report" /> Markdown Report</label>
+            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Run Dark Web Search</button>
+      </form>
+      <div id="darkwebResults" class="results-area"></div>
+    </section>
+
+    <!-- Website Panel -->
+    <section class="panel" id="panel-website">
+      <h2>Website</h2>
+      <p class="panel-desc">Full website recon: DNS, ports, headers, WHOIS, subdomains, and directory discovery.</p>
+      <form class="module-form" id="form-website" data-api="spyglass" data-qtype="website" data-target="websiteTarget" data-results="websiteResults">
+        <div class="form-row">
+          <label for="websiteTarget">Domain or URL</label>
+          <input type="text" id="websiteTarget" placeholder="example.com" />
+        </div>
+        <div class="form-row">
+          <label>Export</label>
+          <div class="checkbox-row">
+            <label><input type="checkbox" data-flag="json" /> JSON</label>
+            <label><input type="checkbox" data-flag="csv" /> CSV</label>
+            <label><input type="checkbox" data-flag="report" /> Markdown Report</label>
+            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Run Website Recon</button>
+      </form>
+      <div id="websiteResults" class="results-area"></div>
+    </section>
+
+    <!-- IP Panel -->
+    <section class="panel" id="panel-ip">
+      <h2>IP Address</h2>
+      <p class="panel-desc">Long-range IP reconnaissance. Passive-first deep intel, optional active nmap scan.</p>
+      <form class="module-form" id="form-ip" data-api="lens" data-target="lensTarget" data-results="lensResults">
+        <div class="form-row">
+          <label for="lensTarget">IP Address or Domain</label>
+          <input type="text" id="lensTarget" placeholder="8.8.8.8" />
+        </div>
+        <div class="form-row">
+          <label>Options</label>
+          <div class="checkbox-row">
+            <label><input type="checkbox" data-flag="passive" checked /> Passive Recon</label>
+            <label><input type="checkbox" data-flag="active" id="lensActive" /> Active nmap Scan</label>
+            <label><input type="checkbox" data-flag="tor" /> Route via Tor</label>
+            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+            <label><input type="checkbox" data-flag="alsoSpyglass" id="ipAlsoSpyglass" /> Also run OSINT IP recon</label>
+          </div>
+        </div>
+        <div class="form-row" id="lensPortsRow" style="display:none;">
+          <label for="lensPorts">Port Spec</label>
+          <input type="text" id="lensPorts" placeholder="top1000" value="top1000" data-flag-input="ports" />
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Run IP Recon</button>
+      </form>
+      <div id="lensResults" class="results-area"></div>
+    </section>
+
+    <!-- Full Investigation Panel -->
+    <section class="panel" id="panel-investigate">
+      <h2>Full Investigation</h2>
+      <p class="panel-desc">Correlate findings across every source. Enter everything you know about a target.</p>
+      <form class="module-form" id="form-investigate" data-api="investigate" data-results="invResults">
+        <div class="form-row">
+          <label for="invEmail">Email</label>
+          <input type="text" id="invEmail" data-key="email" placeholder="user@example.com" />
+        </div>
+        <div class="form-row">
+          <label for="invUsername">Username</label>
+          <input type="text" id="invUsername" data-key="username" placeholder="johndoe" />
+        </div>
+        <div class="form-row">
+          <label for="invPhone">Phone</label>
+          <input type="text" id="invPhone" data-key="phone" placeholder="+1234567890" />
+        </div>
+        <div class="form-row">
+          <label for="invWebsite">Website / Domain</label>
+          <input type="text" id="invWebsite" data-key="website" placeholder="example.com" />
+        </div>
+        <div class="form-row">
+          <label for="invIp">IP Address</label>
+          <input type="text" id="invIp" data-key="ip" placeholder="8.8.8.8" />
+        </div>
+        <div class="form-row">
+          <label for="invInsta">Instagram Username</label>
+          <input type="text" id="invInsta" data-key="insta" placeholder="instagram" />
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Run Cross-Module Investigation</button>
+      </form>
+      <div id="invResults" class="results-area"></div>
+    </section>
+
+    <!-- Metadata Panel -->
+    <section class="panel" id="panel-metadata">
+      <h2>Metadata</h2>
+      <p class="panel-desc">Extract metadata from a local file: EXIF, GPS coordinates, document properties.</p>
+      <form class="module-form" id="form-metadata" data-api="spyglass" data-qtype="metadata" data-target="metaTarget" data-results="metaResults">
+        <div class="form-row">
+          <label for="metaTarget">File Path</label>
+          <input type="text" id="metaTarget" placeholder="/path/to/file.jpg" />
+        </div>
+        <div class="form-row">
+          <label>Export</label>
+          <div class="checkbox-row">
+            <label><input type="checkbox" data-flag="json" /> JSON</label>
+            <label><input type="checkbox" data-flag="csv" /> CSV</label>
+            <label><input type="checkbox" data-flag="report" /> Markdown Report</label>
+            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Extract Metadata</button>
+      </form>
+      <div id="metaResults" class="results-area"></div>
+    </section>
+
+    <!-- OPSEC Panel -->
+    <section class="panel" id="panel-opsec">
+      <h2>OPSEC Check</h2>
+      <p class="panel-desc">Health check: is your proxy active, is your real IP leaking, are requests routed correctly?</p>
+      <form class="module-form" id="form-opsec" data-api="spyglass" data-qtype="opsec" data-results="opsecResults">
+        <div class="form-row">
+          <div class="checkbox-row">
+            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary run-btn">Run OPSEC Health Check</button>
+      </form>
+      <div id="opsecResults" class="results-area"></div>
+    </section>
+
+    <!-- Cases Panel -->
+    <section class="panel" id="panel-cases">
+      <h2>Stored Cases</h2>
+      <p class="panel-desc">Persisted recon results. Diff, timeline, and export your dossiers.</p>
+      <form class="module-form" id="form-cases">
+        <div class="form-row">
+          <label for="casesTarget">Stored Target</label>
+          <input type="text" id="casesTarget" placeholder="user@example.com" />
+        </div>
+        <div class="form-row">
+          <label for="casesQtype">Query Type</label>
+          <select id="casesQtype">
+            <option value="">All types</option>
+            <option value="email">Email</option>
+            <option value="username">Username</option>
+            <option value="phone">Phone</option>
+            <option value="website">Website</option>
+            <option value="ip">IP</option>
+            <option value="darkweb">Dark Web</option>
+            <option value="metadata">Metadata</option>
+            <option value="opsec">OPSEC</option>
+            <option value="investigation">Investigation</option>
+            <option value="instacloak">InstaCloak</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>&nbsp;</label>
+          <div class="checkbox-row">
+            <button type="button" class="btn btn-outline" id="casesDiffBtn">Diff Last Two Runs</button>
+            <button type="button" class="btn btn-outline" id="casesTimelineBtn">Timeline</button>
+            <button type="button" class="btn btn-outline" id="casesProfileBtn">Export Dossier</button>
+          </div>
+        </div>
+      </form>
+      <div id="casesList" class="cases-area">
+        <p class="dim">No stored cases yet. Run a query with "Store in Cases" enabled.</p>
+      </div>
+      <div id="casesDetail" class="results-area"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spyglass-pro"
+version = "1.0.0"
+description = "Spyglass-Pro — unified OSINT superpower wiring Spyglass-OSINT, InstaCloak, and Lens-Extender into one platform"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "AWNW", email = "teamleadertrue@gmail.com" }]
+keywords = ["osint", "recon", "unified", "instagram", "ip", "investigation"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Topic :: Security",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+]
+
+dependencies = [
+  "flask>=3.0",
+  "rich>=13.0",
+  "cryptography>=42.0.0",
+  "httpx>=0.27",
+  "phonenumbers>=8.13",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.8", "mypy>=1.10", "build>=1.2"]
+
+[project.scripts]
+spyglass-pro = "spyglass_pro.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["spyglass_pro*"]
+
+[tool.setuptools.package-data]
+spyglass_pro = ["templates/*.html", "static/favicon.svg", "static/css/*.css", "static/js/*.js"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "S", "B", "BLE", "SIM", "PIE", "RUF", "DTZ", "PLW"]
+ignore = [
+    "BLE001", "RUF012", "S110", "PLW1510", "S311", "S603", "S314", "S104",
+    "DTZ005", "PLW0603", "SIM105", "SIM112", "B904", "PLW2901", "PIE810",
+]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true

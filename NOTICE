@@ -1,0 +1,22 @@
+Spyglass-Pro bundles three MIT-licensed engine packages under
+spyglass_pro/modules/. Each retains its own copyright and license;
+the copies shipped here are vendored from their upstream repositories.
+
+  spyglass_pro/modules/spyglass_osint  Spyglass-OSINT
+    Copyright (c) 2026 Atheer
+    Upstream: Spyglass-OSINT repository (MIT)
+
+  spyglass_pro/modules/instacloak    InstaCloak
+    Copyright (c) 2026 InstaCloak contributors
+    Upstream: InstaCloak repository (MIT)
+
+  spyglass_pro/modules/lens_extender  Lens-Extender
+    Copyright (c) 2026 AWNW
+    Upstream: Lens-Extender repository (MIT)
+
+The full MIT license text for each engine is in its upstream repository's
+LICENSE file. See each engine's source headers for any third-party
+snippet credits carried over from upstream.
+
+Spyglass-Pro itself is Copyright (c) 2026 AWNW, licensed under the MIT
+License (see LICENSE).
