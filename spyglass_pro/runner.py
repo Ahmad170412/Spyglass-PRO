@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import sysconfig
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -33,6 +34,18 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 MODULES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules")
 if MODULES_DIR not in sys.path:
     sys.path.insert(0, MODULES_DIR)
+
+# The engines find their CLI tools with ``shutil.which`` *at import time*,
+# so anything pip-installed into this project's venv (holehe, sherlock,
+# maigret, ignorant, user-scanner) is invisible unless the venv's script
+# directory is on PATH. ``source .venv/bin/activate`` puts it there;
+# ``.venv/bin/python run.py`` does not, and the recon legs silently skip
+# themselves. Put it on PATH before any engine is imported.
+_SCRIPTS_DIR = sysconfig.get_path("scripts")
+if _SCRIPTS_DIR and os.path.isdir(_SCRIPTS_DIR):
+    _path_parts = os.environ.get("PATH", "").split(os.pathsep)
+    if _SCRIPTS_DIR not in _path_parts:
+        os.environ["PATH"] = os.pathsep.join([_SCRIPTS_DIR] + [p for p in _path_parts if p])
 
 # Bounded pool: a handful of concurrent heavy scans (sherlock, nmap,
 # browser runs) is plenty; extra requests queue here instead of piling
@@ -517,13 +530,35 @@ def run_lens(target, flags):
         return {"error": f"report build failed: {_safe_error(exc)}"}
     progress.add(f"lens-extender {scan_type} scan complete")
 
+    stored_run_id = None
     if flags.get("store"):
         le_store.store_scan(target, report, scan_type=scan_type)
+        stored_run_id = _lens_last_scan_id(target)
 
     response = dict(report) if isinstance(report, dict) else {"report": report}
+    if stored_run_id:
+        response["stored_run_id"] = stored_run_id
     response["progress"] = progress.lines
     response["summary"] = _lens_summary(report, target)
     return response
+
+
+def _lens_last_scan_id(target):
+    """Row id of the scan just written, so the UI can refresh the case list."""
+    try:
+        from lens_extender import store as le_store
+        conn = le_store._get_conn()
+    except Exception:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT id FROM scans WHERE target=? ORDER BY id DESC LIMIT 1", (target,)
+        ).fetchone()
+        return row["id"] if row else None
+    except Exception:
+        return None
+    finally:
+        conn.close()
 
 
 def _lens_summary(report, target):
@@ -583,6 +618,29 @@ def run_investigate(payload):
 
     result["progress"] = progress.lines
     result["summary"] = _investigate_summary(inputs, result)
+
+    # The investigation panel's option checkboxes (json/csv/report/store)
+    # arrive in the same payload as the target fields, so artifacts are
+    # attached here rather than through _finish().
+    if not (isinstance(result, dict) and "error" in result):
+        try:
+            from spyglass_osint import export, store
+            from spyglass_osint import report as report_mod
+            target = ", ".join(inputs.values())
+            if payload.get("json"):
+                _add_artifact(result, export.json_output(result, target, "investigation"), "json")
+            if payload.get("csv"):
+                _add_artifact(result, export.csv_output(result, target, "investigation"), "csv")
+            if payload.get("report"):
+                _add_artifact(result, report_mod.write_report(result, "investigation", target),
+                              "report")
+            if payload.get("store"):
+                run_id = store.store_result(result, "investigation", target)
+                if run_id:
+                    result["stored_run_id"] = run_id
+        except Exception as exc:
+            result["artifact_error"] = _safe_error(exc)
+
     return result
 
 

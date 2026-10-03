@@ -1,5 +1,7 @@
 import os
 import secrets
+import importlib
+import shutil
 from urllib.parse import urlparse
 
 from flask import Flask, jsonify, render_template, request
@@ -16,6 +18,26 @@ app.config["SECRET_KEY"] = os.environ.get("SPYGLASS_PRO_SECRET") or secrets.toke
 # junk with control characters, ...) is rejected before it reaches the
 # process environment that every subprocess inherits.
 _PROXY_SCHEMES = {"http", "https", "socks4", "socks4a", "socks5", "socks5h"}
+
+# Optional CLI tools the engines shell out to. blackbird ships as a script,
+# hence the two-name lookup. Keep in sync with spyglass_osint.utils.
+_TOOL_PROBES = {
+    "holehe": ("holehe",),
+    "user-scanner": ("user-scanner",),
+    "sherlock": ("sherlock",),
+    "maigret": ("maigret",),
+    "blackbird": ("blackbird", "blackbird.py"),
+    "ignorant": ("ignorant",),
+    "phoneinfoga": ("phoneinfoga",),
+    "dig": ("dig",),
+    "whois": ("whois",),
+    "httpx": ("httpx",),
+    "gobuster": ("gobuster",),
+    "nmap": ("nmap",),
+    "shodan": ("shodan",),
+    "exiftool": ("exiftool",),
+    "curl": ("curl",),
+}
 
 
 def _validate_proxy(value):
@@ -63,17 +85,63 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    modules = {
-        "spyglass": {"available": True, "label": "Spyglass-OSINT", "icon": "radar"},
-        "instacloak": {"available": True, "label": "InstaCloak", "icon": "camera"},
-        "lens_extender": {"available": True, "label": "Lens-Extender", "icon": "lens"},
-    }
+    """Module availability plus the optional CLI tools behind each one.
+
+    The engines resolve their tools with ``shutil.which`` at *import* time,
+    so a tool installed after the server started would stay invisible. Probe
+    the names again here — the lookup rules mirror ``spyglass_osint.utils``.
+    """
+    tools = {name: bool(_which_any(*candidates))
+             for name, candidates in _TOOL_PROBES.items()}
+    missing = sorted(name for name, found in tools.items() if not found)
     return jsonify({
         "status": "ok",
         "version": __version__,
         "proxy": os.environ.get("SPYGLASS_PROXY", ""),
-        "modules": modules,
+        "modules": {
+            "spyglass": {"available": True, "label": "Spyglass-OSINT", "icon": "radar"},
+            "instacloak": {"available": _module_imports("instacloak"),
+                           "label": "InstaCloak", "icon": "camera"},
+            "lens_extender": {"available": _module_imports("lens_extender"),
+                              "label": "Lens-Extender", "icon": "lens"},
+        },
+        "tools": tools,
+        "missing_tools": missing,
+        "degraded": _degraded(tools),
     })
+
+
+def _which_any(*names):
+    return next((shutil.which(name) for name in names if shutil.which(name)), None)
+
+
+def _module_imports(name):
+    """A module is available when its package imports (deps present)."""
+    try:
+        importlib.import_module(name)
+        return True
+    except Exception:
+        return False
+
+
+def _degraded(tools):
+    """Which recon legs each query type cannot run right now.
+
+    A missing tool does not fail the scan — the engine skips that leg and
+    returns the rest — so the UI has to say so, or a partial result reads
+    as a complete one.
+    """
+    legs = {
+        "email": ["holehe", "user-scanner", "blackbird"],
+        "username": ["user-scanner", "sherlock", "maigret", "blackbird"],
+        "phone": ["ignorant", "phoneinfoga"],
+        "website": ["dig", "whois", "httpx", "gobuster"],
+        "ip": ["nmap", "shodan"],
+        "metadata": ["exiftool"],
+    }
+    return {qtype: [tool for tool in needed if not tools.get(tool)]
+            for qtype, needed in legs.items()
+            if any(not tools.get(tool) for tool in needed)}
 
 
 @app.route("/api/proxy", methods=["GET", "POST"])

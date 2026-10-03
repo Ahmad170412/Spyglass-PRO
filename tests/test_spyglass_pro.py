@@ -9,6 +9,7 @@ Everything here is hermetic — a temporary ``SPYGLASS_HOME`` for the case
 store, no network, no browser.
 """
 
+import contextlib
 import os
 import pathlib
 import tempfile
@@ -124,6 +125,93 @@ class JobPoolTest(unittest.TestCase):
 
     def test_successful_job_returns_result(self):
         self.assertEqual(runner.run_job(lambda: {"ok": 1}), {"ok": 1})
+
+
+class StoredRunFeedbackTest(unittest.TestCase):
+    """A scan that stored a run must say so.
+
+    ``stored_run_id`` is what the frontend uses to refresh the Cases table
+    and to confirm the store happened — every store path has to set it.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._env = mock.patch.dict(
+            os.environ, {"SPYGLASS_HOME": self._tmp.name})
+        self._env.start()
+        import pathlib as _pathlib
+        import lens_extender.store as le_store
+        self._lens = mock.patch.multiple(
+            le_store,
+            STORE_DIR=_pathlib.Path(self._tmp.name) / "lens",
+            STORE_FILE=_pathlib.Path(self._tmp.name) / "lens" / "cases.db",
+        )
+        self._lens.start()
+
+    def tearDown(self):
+        self._lens.stop()
+        self._env.stop()
+        self._tmp.cleanup()
+
+    def test_spyglass_run_reports_stored_run_id(self):
+        result = runner.run_spyglass(
+            "opsec", "self", {"store": "1"})
+        self.assertIn("stored_run_id", result)
+        self.assertEqual(result["stored_run_id"], 1)
+
+    def test_lens_run_reports_stored_run_id(self):
+        from lens_extender import analyzer, osint as le_osint
+
+        class FakeResult:
+            resolved_ip = "1.1.1.1"
+            domain = "example.com"
+            reverse_dns = "host.example.com"
+            errors = []
+
+        with mock.patch.object(le_osint, "gather", return_value=FakeResult()), \
+             mock.patch.object(analyzer, "build_report",
+                               return_value={"resolved_ip": "1.1.1.1"}) as build:
+            result = runner.run_lens("1.1.1.1", {"store": "1"})
+        self.assertTrue(build.called)
+        self.assertEqual(result.get("stored_run_id"), 1, result)
+
+    def test_investigation_reports_stored_run_id(self):
+        from spyglass_osint import investigation
+        with mock.patch.object(investigation, "investigate",
+                               return_value={"entities": {}, "correlations": []}):
+            result = runner.run_investigate({"email": "a@x.com", "store": "1"})
+        self.assertEqual(result.get("stored_run_id"), 1)
+
+    def test_investigation_without_store_says_nothing(self):
+        from spyglass_osint import investigation
+        with mock.patch.object(investigation, "investigate",
+                               return_value={"entities": {}, "correlations": []}):
+            result = runner.run_investigate({"email": "a@x.com"})
+        self.assertNotIn("stored_run_id", result)
+
+    def test_investigation_honours_export_flags(self):
+        from spyglass_osint import investigation
+        # export.* writes into the working directory — keep that out of the repo.
+        with tempfile.TemporaryDirectory() as workdir, \
+             mock.patch.dict(os.environ, {"SPYGLASS_HOME": self._tmp.name}), \
+             mock.patch("os.getcwd", return_value=workdir), \
+             _chdir(workdir), \
+             mock.patch.object(investigation, "investigate",
+                               return_value={"entities": {}, "correlations": []}):
+            result = runner.run_investigate({"email": "a@x.com", "json": "1"})
+            kinds = [a["kind"] for a in result.get("artifacts", [])]
+            self.assertIn("json", kinds)
+
+
+@contextlib.contextmanager
+def _chdir(path):
+    """export.py writes relative to the process CWD, not SPYGLASS_HOME."""
+    previous = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
 
 
 class CaseQueryTest(unittest.TestCase):

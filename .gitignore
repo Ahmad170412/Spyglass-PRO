@@ -19,6 +19,10 @@ output/
 *.db
 *.sqlite
 *.log
+# Exports land in the working directory of a run
+spyglass_*.json
+spyglass_*.csv
+spyglass_*.md
 
 # Local engine config — may hold burner credentials / proxy secrets
 config.toml

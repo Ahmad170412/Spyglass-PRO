@@ -59,6 +59,9 @@ document.addEventListener('DOMContentLoaded', function () {
     if (target) target.classList.add('active');
     var main = document.getElementById('mainContent');
     if (main) main.scrollTop = 0;
+    /* Re-read on open: runs stored by another tab or a CLI scan since the
+       last load belong in the table too. */
+    if (panelId === 'cases') loadCases();
   }
 
   navItems.forEach(function (item) {
@@ -164,6 +167,9 @@ document.addEventListener('DOMContentLoaded', function () {
         form.querySelectorAll('[data-key]').forEach(function (el) {
           payload[el.getAttribute('data-key')] = el.value.trim();
         });
+        /* The option checkboxes (json/csv/report/store) are flags, not
+           target fields — they have to ride along or they do nothing. */
+        Object.keys(flags).forEach(function (k) { payload[k] = flags[k]; });
         apiFetch('/api/investigate/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -243,6 +249,7 @@ document.addEventListener('DOMContentLoaded', function () {
   /* ── Load status on startup ── */
   apiFetch('/api/status').then(function (r) { return r.json(); }).then(function (data) {
     updateProxyUI(data.proxy || '');
+    updateModuleTags(data);
   }).catch(function () {
     showToast('Server unreachable', 'error');
   });
@@ -276,6 +283,59 @@ function showToast(msg, type) {
   toast.textContent = msg;
   container.appendChild(toast);
   setTimeout(function () { toast.remove(); }, 4000);
+}
+
+/* Optional recon tools (sherlock, maigret, holehe, ignorant, ...) are
+   discovered on PATH. A missing one does not fail a scan — the engine
+   skips that leg — so without this the UI would present a partial result
+   as a complete one. */
+var STATUS = null;
+
+function updateModuleTags(data) {
+  STATUS = data || null;
+  var tags = document.getElementById('moduleTags');
+  if (!tags || !STATUS) return;
+  var degraded = STATUS.degraded || {};
+  var missingFor = {};
+  Object.keys(degraded).forEach(function (qtype) {
+    degraded[qtype].forEach(function (tool) { missingFor[tool] = true; });
+  });
+  tags.querySelectorAll('.mod-tag').forEach(function (tag) {
+    var mod = tag.getAttribute('data-mod');
+    var info = (STATUS.modules || {})[mod] || {};
+    var notes = [];
+    if (info.available === false) {
+      notes.push('engine not importable — its dependencies are missing');
+    } else if (mod === 'spyglass' && Object.keys(missingFor).length) {
+      notes.push('partial recon: missing ' + Object.keys(missingFor).sort().join(', '));
+    }
+    tag.classList.toggle('degraded', notes.length > 0);
+    tag.title = notes.length ? notes.join(' · ')
+                             : (info.label || mod) + ' — all tools present';
+  });
+  renderMissingNotice();
+}
+
+/* A quiet line on the panels whose recon legs are incomplete. */
+function renderMissingNotice() {
+  var notice = document.getElementById('toolNotice');
+  if (!notice || !STATUS) return;
+  var degraded = STATUS.degraded || {};
+  var lines = [];
+  var labels = { email: 'Email', username: 'Username', phone: 'Phone',
+                 website: 'Website', ip: 'IP address', metadata: 'Metadata' };
+  Object.keys(degraded).forEach(function (qtype) {
+    lines.push((labels[qtype] || qtype) + ': no ' + degraded[qtype].join(', '));
+  });
+  if (!lines.length) {
+    notice.innerHTML = '';
+    notice.style.display = 'none';
+    return;
+  }
+  notice.style.display = 'block';
+  notice.innerHTML = '<span class="tool-notice-title">Partial recon</span> Some optional ' +
+    'tools are not installed, so those legs are skipped: ' + escapeHtml(lines.join(' · ')) +
+    '. <code>pip install holehe sherlock maigret ignorant</code> or <code>brew install</code> them to enable.';
 }
 
 function setLoading(btn, loading) {
@@ -378,6 +438,12 @@ function displayResults(containerId, data, append, qtype) {
       });
       html += '</div>';
     }
+    if (data.stored_run_id) {
+      html += '<div class="artifact-list"><span class="run-log-title">Stored</span>' +
+              '<div class="artifact-item"><span class="artifact-kind">case</span>' +
+              '<code>run #' + escapeHtml(String(data.stored_run_id)) +
+              ' — visible under Stored Cases</code></div></div>';
+    }
     html += renderBody(data, qtype || '');
     var raw = typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data);
     html += '<details class="raw-json"><summary>Raw JSON</summary><pre>' + escapeHtml(raw) + '</pre></details>';
@@ -390,6 +456,12 @@ function displayResults(containerId, data, append, qtype) {
     container.insertAdjacentHTML('beforeend', html);
   } else {
     container.innerHTML = html;
+  }
+
+  /* A stored run changes the Cases table — refresh it in place so the
+     newest scan shows up without a page reload. */
+  if (data && data.stored_run_id) {
+    loadCases();
   }
 }
 
