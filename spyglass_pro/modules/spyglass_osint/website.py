@@ -24,9 +24,8 @@ zone transfer. All of those require touching the target.
 
 Design principles
 -----------------
-* No paid APIs and no API keys. Passive sources are crt.sh, HackerTarget,
-  AlienVault OTX (public endpoint), CertSpotter, and the Wayback Machine CDX
-  index.
+* No paid APIs and no API keys. Passive sources are crt.sh, CertSpotter,
+  HackerTarget and the Wayback Machine CDX index.
 * OPSEC-aware: HTTP goes through curl (which honors --proxy) to third-party
   hosts only; DNS through ``dig`` is routed via torsocks when a proxy is
   active; in-process DNS resolution is only used when no proxy is set, so the
@@ -191,19 +190,31 @@ def _http_body(url, timeout=15, limit=1_000_000):
     key = (url, limit)
     if key in _BODY_CACHE:
         return _BODY_CACHE[key]
-    body = ""
-    if _CURL:
-        try:
-            r = _sh([_CURL, "-sS", "-L", "-A", UA, "--max-time", str(timeout), url])
-            if r.returncode == 0 and r.stdout:
-                body = r.stdout[:limit]
-        except Exception:
-            pass
-    if not body:
-        got = _urllib_get(url, timeout=timeout, want="body", limit=limit)
-        body = got[1] if got else ""
-    _BODY_CACHE[key] = body
-    return body
+
+    def _once():
+        body = ""
+        if _CURL:
+            try:
+                r = _sh([_CURL, "-sS", "-L", "-A", UA, "--max-time", str(timeout), url])
+                if r.returncode == 0 and r.stdout:
+                    body = r.stdout[:limit]
+            except Exception:
+                pass
+        if not body:
+            got = _urllib_get(url, timeout=timeout, want="body", limit=limit)
+            body = got[1] if got else ""
+        return body
+
+    # Retry: these are free third-party endpoints (crt.sh, CertSpotter,
+    # HackerTarget, Wayback) that rate-limit and 5xx transiently. Without
+    # this a single 429 drops the source from the report silently.
+    body = utils.retry_call(_once, attempts=3)
+    # Only cache a success. Caching the empty string would make one
+    # transient failure permanent for the rest of the process, which is
+    # strictly worse than not caching at all.
+    if body:
+        _BODY_CACHE[key] = body
+    return body or ""
 
 
 def _http_status(url, timeout=15, follow=True):

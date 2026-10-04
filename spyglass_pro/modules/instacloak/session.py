@@ -33,9 +33,13 @@ def open_session(cfg: dict, username: str):
 
     if (cfg.get("login_enabled") and cfg.get("login_username")
             and cfg.get("login_password")):
-        # Burner sessions share one profile so the login persists across targets
-        profile_dir = str(Path(cfg["profiles_dir"]) / "login")
-        say("  burner profile (shared, logged-in mode)", "magenta")
+        # Burner sessions share one profile so the login persists across targets.
+        # Keyed by the burner username so rotating to a fresh account gets a
+        # clean profile instead of inheriting the old one's cookies, device
+        # fingerprint and any flag Instagram has already attached to it.
+        profile_dir = str(Path(cfg["profiles_dir"])
+                          / f"login-{safe_dir_name(cfg['login_username'])}")
+        say(f"  burner profile @{cfg['login_username']} (shared, logged-in mode)", "magenta")
     else:
         # Defense in depth: never let the username escape profiles_dir
         profile_dir = str(Path(cfg["profiles_dir"]) / safe_dir_name(username))

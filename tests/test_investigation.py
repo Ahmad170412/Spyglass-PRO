@@ -76,6 +76,52 @@ class CorrelateTest(unittest.TestCase):
         self.assertTrue(any("Username found on 2 platforms" in c["desc"] for c in corr))
 
 
+class CountryMatchTest(unittest.TestCase):
+    """``_country_matches`` compares an ISO alpha-2 phone region against a
+    free-text WHOIS country. It used to do that with substring containment,
+    which matched unrelated countries; these pin the exact behaviour.
+    """
+
+    def test_codes_and_canonical_names_match(self):
+        for code, country in (("GB", "United Kingdom"), ("US", "United States"),
+                              ("DE", "Germany"), ("CA", "Canada"), ("SG", "Singapore"),
+                              ("RU", "russia"), ("FR", "fr")):
+            self.assertTrue(inv._country_matches(code, country), f"{code}/{country}")
+
+    def test_registry_spellings_match(self):
+        for code, country in (("KR", "Korea, Republic of"), ("CI", "Cote d'Ivoire"),
+                              ("US", "USA"), ("GB", "Great Britain"), ("BO", "Bolivia")):
+            self.assertTrue(inv._country_matches(code, country), f"{code}/{country}")
+
+    def test_unrelated_countries_do_not_match(self):
+        # Every one of these was a false positive under substring matching:
+        # "us" in "russia", "ch" in "china", "in" in "indonesia", "uk" in
+        # "ukraine", "us" in "austria", "de" in "denmark".
+        for code, country in (("US", "russia"), ("CH", "china"), ("IN", "indonesia"),
+                              ("GB", "Ukraine"), ("US", "Austria"), ("DE", "Denmark"),
+                              ("GB", "US"), ("IN", "Iran")):
+            self.assertFalse(inv._country_matches(code, country), f"{code}/{country}")
+
+    def test_missing_or_malformed_input_is_not_a_match(self):
+        for code, country in (("", "US"), ("USA", "US"), ("GB", ""), (None, None),
+                              ("1", "US"), ("GB", "1")):
+            self.assertFalse(inv._country_matches(code, country), f"{code!r}/{country!r}")
+
+    def test_no_match_surfaces_as_a_correlation(self):
+        """A US number against a Russian domain must not be reported as a match."""
+        results = {"phone": {"phonenumbers": {"region": "US"}},
+                   "website": {"whois": {"Country": "Russia"}}}
+        corr = inv._correlate({"phone": "+1 202 555 0143"}, results, _entities())
+        self.assertFalse(any("Phone region matches" in c["desc"] for c in corr))
+
+    def test_real_match_still_surfaces(self):
+        results = {"phone": {"phonenumbers": {"region": "GB"}},
+                   "website": {"whois": {"Country": "United Kingdom"}}}
+        corr = inv._correlate({"phone": "+44 7700 900123"}, results, _entities())
+        self.assertTrue(any(c["type"] == "match" and "Phone region matches" in c["desc"]
+                            for c in corr))
+
+
 class InvestigateTest(unittest.TestCase):
     def test_runs_modules_and_collects_entities(self):
         email_mod = imp("email")

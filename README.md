@@ -29,8 +29,10 @@ gracefully when one is missing.
 
 **Spyglass-Pro never opens a connection to a target.** Every query goes to
 a third party: DNS resolvers, Certificate Transparency logs, WHOIS
-registries, Shodan, InternetDB, RDAP, RIPEstat, GreyNoise, Censys,
-Wayback, crt.sh, CertSpotter, HackerTarget, breach databases.
+registries, InternetDB, RDAP, RIPEstat, Wayback, crt.sh, CertSpotter,
+HackerTarget, and breach databases. Shodan, GreyNoise, Censys, AbuseIPDB,
+VirusTotal and NVD enrichment are wired but need an API key — see
+[Configuration](#configuration).
 
 There is no port scan, no directory brute force, no HTTP probing of
 discovered hosts, no zone-transfer attempt and not even a fetch of the
@@ -93,7 +95,7 @@ and the API with no other changes.
 .venv/bin/python tests/run_tests.py
 ```
 
-269 offline checks — the three engines' own suites plus the merge layer
+289 offline checks — the three engines' own suites plus the merge layer
 (API surface, auth gate, proxy validation, job pool, case queries). No
 network and no browser required.
 
@@ -135,7 +137,7 @@ willing to lose. You are responsible for compliance with applicable laws.
 
 ```
 run.py                  dev entry point
-tests/                  269 offline checks (run_tests.py)
+tests/                  289 offline checks (run_tests.py)
 spyglass_pro/
   app.py                Flask routes + auth gate + proxy validation
   runner.py             job pool (queue cap, timeouts), engine dispatch

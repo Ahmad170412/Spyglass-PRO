@@ -1,4 +1,116 @@
 import concurrent.futures
+import re
+import unicodedata
+
+# Alternate English country names seen in WHOIS `Country:` fields, keyed by
+# ISO-3166 alpha-2. Normalized the same way as _norm_country(). Single-word
+# entries are compared for equality only — substring-matching them is what
+# made "UK" match "UKRAINE". Multi-word entries may match as a substring,
+# because registrars reorder them ("Korea, Republic of").
+_COUNTRY_ALIASES = {
+    "GB": ("UNITED KINGDOM", "GREAT BRITAIN", "ENGLAND", "UK"),
+    "US": ("UNITED STATES", "UNITED STATES OF AMERICA", "USA"),
+    "KR": ("SOUTH KOREA", "REPUBLIC OF KOREA", "KOREA REPUBLIC OF", "KOREA"),
+    "KP": ("NORTH KOREA", "KOREA DEMOCRATIC PEOPLES REP"),
+    "CD": ("DEMOCRATIC REPUBLIC OF THE CONGO", "DRC", "CONGO KINSHASA", "CONGO"),
+    "CG": ("CONGO BRAZZAVILLE", "CONGO", "REPUBLIC OF THE CONGO"),
+    "CZ": ("CZECHIA", "CZECH REPUBLIC"),
+    "CI": ("COTE D IVOIRE", "COTE DIVOIRE"),
+    "VA": ("VATICAN", "VATICAN CITY", "HOLY SEE"),
+    "IR": ("IRAN", "ISLAMIC REPUBLIC OF IRAN"),
+    "VE": ("VENEZUELA", "BOLIVARIAN REPUBLIC OF VENEZUELA"),
+    "SY": ("SYRIA", "SYRIAN ARAB REPUBLIC"),
+    "LA": ("LAOS", "LAO PEOPLES DEMOCRATIC REPUBLIC"),
+    "MD": ("MOLDOVA", "REPUBLIC OF MOLDOVA"),
+    "MK": ("MACEDONIA", "NORTH MACEDONIA"),
+    "TZ": ("TANZANIA", "UNITED REPUBLIC OF TANZANIA"),
+    "VN": ("VIETNAM", "VIET NAM"),
+    "BO": ("BOLIVIA", "PLURINATIONAL STATE OF BOLIVIA"),
+    "RU": ("RUSSIA", "RUSSIAN FEDERATION"),
+    "BN": ("BRUNEI", "BRUNEI DARUSSALAM"),
+    "CV": ("CAPE VERDE", "CABO VERDE"),
+    "SZ": ("SWAZILAND", "ESWATINI"),
+    "TR": ("TURKEY", "TURKIYE"),
+    "MV": ("MALDIVES",),
+    "MM": ("MYANMAR", "BURMA"),
+    "TW": ("TAIWAN", "TAIWAN PROVINCE OF CHINA", "CHINESE TAIPEI"),
+    "HK": ("HONG KONG", "HONG KONG SAR"),
+    "MO": ("MACAO", "MACAU"),
+    "PS": ("PALESTINE", "PALESTINIAN TERRITORY", "OCCUPIED PALESTINIAN TERRITORY"),
+}
+
+
+def _norm_country(text):
+    """Fold a country string to a comparison key.
+
+    Strips accents, punctuation and case so "Côte d'Ivoire", "cote d'ivoire"
+    and "COTE D IVOIRE" are one key.
+    """
+    s = unicodedata.normalize("NFKD", str(text or ""))
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = re.sub(r"[^A-Za-z]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip().upper()
+
+
+_REGION_NAMES = None
+
+
+def _region_names():
+    """ISO alpha-2 -> canonical English country name, built once.
+
+    Derived from phonenumbers, already a hard dependency, so this does not
+    need a hand-maintained country table. Degrades to {} if the lookup is
+    unavailable, leaving only code-to-code comparison.
+    """
+    global _REGION_NAMES
+    if _REGION_NAMES is None:
+        table = {}
+        try:
+            from phonenumbers import COUNTRY_CODE_TO_REGION_CODE
+            from phonenumbers.geocoder import _region_display_name
+            for regions in COUNTRY_CODE_TO_REGION_CODE.values():
+                for rc in regions:
+                    try:
+                        name = _region_display_name(rc, "en")
+                    except Exception:  # noqa: S112 - one unknown region must not lose the table
+                        continue
+                    if name:
+                        table.setdefault(rc, _norm_country(name))
+        except Exception:
+            table = {}
+        _REGION_NAMES = table
+    return _REGION_NAMES
+
+
+def _country_matches(region_code: str, whois_country: str) -> bool:
+    """Does a phone's ISO region match a free-text WHOIS country?
+
+    ``phone.py`` stores ``region`` as the alpha-2 code (``"GB"``) while
+    WHOIS spells the country out (``"United Kingdom"``). The original check
+    compared the two with substring containment, which was wrong in both
+    directions:
+
+    * false positives — ``"us" in "russia"``, ``"ch" in "china"`` and
+      ``"in" in "indonesia"`` each reported an unrelated phone number and
+      domain as a *match*;
+    * false negatives — a UK number against ``"United Kingdom"`` matched
+      nothing, because the code is not a prefix of the name.
+
+    So compare normalized names, never substrings. Anything unresolvable
+    returns False: a fabricated match is worse than a missed one.
+    """
+    code = (region_code or "").strip().upper()
+    wc = _norm_country(whois_country)
+    if not code or not wc or len(code) != 2 or not code.isalpha():
+        return False
+    if len(wc) == 2 and wc.isalpha():
+        return wc == code
+    names = _region_names()
+    canonical = names.get(code)
+    if canonical and canonical == wc:
+        return True
+    return any(wc == alias or (" " in alias and alias in wc)
+               for alias in _COUNTRY_ALIASES.get(code, ()))
 
 
 def investigate(raw_inputs):
@@ -193,10 +305,10 @@ def _correlate(inputs, results, entities):
     if "error" not in pr:
         pi = pr.get("phonenumbers", {})
         if "error" not in pi and "error" not in wr:
-            region = pi.get("region", "").lower()
+            region = pi.get("region", "")
             who = wr.get("whois", {})
-            wc = who.get("Country", "").lower()
-            if region and wc and (region[:2] == wc[:2] or region in wc or wc in region):
+            wc = who.get("Country", "")
+            if _country_matches(region, wc):
                 corr.append({"type": "match", "desc": "Phone region matches WHOIS country",
                              "detail": f"{region} ↔ {wc}"})
 

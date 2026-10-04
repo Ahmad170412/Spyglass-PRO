@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from urllib.parse import urlparse
 
 # ─── proxy ─────────────────────────────────────────────────
@@ -74,19 +75,50 @@ _EXIFTOOL = shutil.which("exiftool")
 
 # ─── network helpers ──────────────────────────────────────
 
+def retry_call(fn, attempts=3, base_delay=1.0, max_delay=8.0):
+    """Call ``fn`` until it returns something truthy, backing off between tries.
+
+    Every passive source this engine uses is a free third-party endpoint:
+    crt.sh, CertSpotter, HackerTarget, Wayback CDX, ip-api, RDAP, RIPEstat.
+    They rate-limit hard, and several 5xx under load. With a single attempt
+    one 429 or one blip silently removes that source from the result — the
+    scan still "succeeds", just with less in it, which is the worst way to
+    lose data. `lens_extender/osint.py::_get` already retries the same
+    endpoints with backoff; this keeps the two engines degrading alike.
+
+    Only for idempotent GETs against third-party APIs — never for anything
+    that touches the target's own network. Returns the first truthy result,
+    or None if every attempt came back empty.
+    """
+    for attempt in range(attempts):
+        try:
+            out = fn()
+            if out:
+                return out
+        except Exception:
+            pass
+        if attempt < attempts - 1:
+            time.sleep(min(max_delay, base_delay * (2 ** attempt)))
+    return None
+
+
 def _curl_json(url, timeout=15):
     if not _CURL:
         return None
-    cmd = [_CURL, "-s", url]
-    if _PROXY:
-        cmd = cmd[:1] + _proxy_args() + cmd[1:]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if r.returncode == 0 and r.stdout.strip():
-            return json.loads(r.stdout.strip())
-    except Exception:
-        pass
-    return None
+
+    def _once():
+        cmd = [_CURL, "-sS", "-L", "--max-time", str(timeout), url]
+        if _PROXY:
+            cmd = cmd[:1] + _proxy_args() + cmd[1:]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if r.returncode == 0 and r.stdout.strip():
+                return json.loads(r.stdout.strip())
+        except Exception:
+            pass
+        return None
+
+    return retry_call(_once)
 
 
 def _check_tool(name, path):

@@ -7,6 +7,7 @@ fixtures. That is where a silent field-mapping bug would hide: a renamed
 key produces a blank cell, not an exception.
 """
 
+import os
 import re
 import unittest
 from pathlib import Path
@@ -106,6 +107,104 @@ class RegistryTest(unittest.TestCase):
         platform = registry.get("instagram")
         self.assertEqual(platform.profile_url("example"),
                          "https://www.instagram.com/example/")
+
+    def test_burner_login_forces_a_visible_browser(self):
+        """Headless + burner = guaranteed login failure.
+
+        instacloak.auth's challenge hand-off polls a *visible* window for
+        120s waiting for a human to clear the verification prompt. With no
+        window it burns the timeout and continues logged-out, silently
+        losing the feature the operator enabled. So headless loses.
+        """
+        from spyglass_pro.social import harness
+
+        cfg = harness._cfg_for({
+            "headless": True,
+            "burner_username": "burner_one",
+            "burner_password": "hunter2hunter2",
+        })
+        self.assertTrue(cfg["login_enabled"])
+        self.assertFalse(cfg["headless"], "burner login must not run headless")
+
+    def test_headless_is_honoured_without_a_burner(self):
+        from spyglass_pro.social import harness
+
+        cfg = harness._cfg_for({"headless": True})
+        self.assertTrue(cfg["headless"])
+
+    def test_partial_burner_credentials_do_not_enable_a_login(self):
+        """A username with no password is not a login — it must not force headed."""
+        from spyglass_pro.social import harness
+
+        cfg = harness._cfg_for({"headless": True, "burner_username": "only_a_name"})
+        self.assertFalse(cfg.get("login_enabled"))
+        self.assertTrue(cfg["headless"])
+
+
+class BurnerProfileTest(unittest.TestCase):
+    """The burner profile directory decides how much a rotated account
+    inherits from the previous one."""
+
+    def setUp(self):
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def _cfg(self, burner="burner_one", **over):
+        cfg = {"login_enabled": True, "login_username": burner,
+               "login_password": "pw", "profiles_dir": self._tmp.name,
+               "headless": False, "proxy_enabled": False, "proxy_url": "",
+               "geoip": False, "minimal": False, "output_dir": self._tmp.name,
+               "user_data_dir": self._tmp.name, "download_media": False, "deep": False}
+        cfg.update(over)
+        return cfg
+
+    def _open(self, cfg):
+        """Call open_session with the browser stubbed; return the launch kwargs."""
+        from unittest import mock
+
+        from instacloak import session
+
+        captured = {}
+
+        def fake_launch(persistent_context=None, **kwargs):
+            captured.update(kwargs)
+            captured["_persistent_context"] = persistent_context
+            return mock.MagicMock()
+
+        with mock.patch.object(session, "launch_persistent_context", fake_launch), \
+             mock.patch.object(session, "say", lambda *a, **k: None), \
+             mock.patch.object(session, "say_parts", lambda *a, **k: None):
+            session.open_session(cfg, "someone")
+        return captured
+
+    def test_burner_profile_is_keyed_by_the_burner_username(self):
+        captured = self._open(self._cfg("burner_one"))
+        self.assertIn("login-burner_one", str(captured["_persistent_context"]))
+
+    def test_rotating_burners_does_not_reuse_the_old_profile(self):
+        """A fresh burner must not inherit the previous one's cookies and flags."""
+        one = self._open(self._cfg("burner_one"))["_persistent_context"]
+        two = self._open(self._cfg("burner_two"))["_persistent_context"]
+        self.assertNotEqual(str(one), str(two))
+
+    def test_no_burner_uses_a_per_target_profile(self):
+        captured = self._open(self._cfg(burner=None, login_enabled=False,
+                                        login_username=None, login_password=None))
+        self.assertIn("someone", str(captured["_persistent_context"]))
+
+    def test_profile_name_stays_one_path_component(self):
+        """Traversal guard: the result must be a single component, so a
+        username can never escape profiles_dir."""
+        from instacloak.session import safe_dir_name
+
+        for hostile in ("../../etc/passwd", "a/b", "..", "/abs/path", "x\\y"):
+            out = safe_dir_name(hostile)
+            self.assertNotIn("/", out, hostile)
+            self.assertNotIn("\\", out, hostile)
+            self.assertNotIn(os.sep, out, hostile)
+            self.assertTrue(out, hostile)
 
     def test_describe_exposes_capabilities(self):
         for entry in registry.describe():

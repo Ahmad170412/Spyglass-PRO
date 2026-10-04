@@ -80,11 +80,18 @@ def _cfg_for(options: dict) -> dict:
 
     Reusing instacloak.config keeps one set of knobs (headless, proxy,
     geoip, delays, profiles_dir) instead of a second, drifting copy.
+
+    Headless is forced off when a burner login is enabled. The login flow's
+    challenge hand-off (``instacloak.auth``) polls a *visible* browser
+    window for 120 seconds waiting for a human to clear Instagram's
+    verification prompt — there is no window to clear it in when headless,
+    so every challenged login would burn the full timeout and then quietly
+    continue logged-out. Silently losing the feature the operator just
+    enabled is worse than ignoring a checkbox, so the checkbox loses.
     """
     from instacloak import config as ic_config
 
     cfg = ic_config.load_config(None)
-    cfg["headless"] = bool(options.get("headless"))
     cfg["deep"] = bool(options.get("deep"))
     cfg["download_media"] = bool(options.get("media"))
     if options.get("proxy_url"):
@@ -94,6 +101,8 @@ def _cfg_for(options: dict) -> dict:
         cfg["login_enabled"] = True
         cfg["login_username"] = options["burner_username"]
         cfg["login_password"] = options["burner_password"]
+    requested_headless = bool(options.get("headless"))
+    cfg["headless"] = False if cfg.get("login_enabled") else requested_headless
     return cfg
 
 
@@ -125,6 +134,11 @@ def collect(platform_key: str, handle: str, options: dict | None = None,
     from instacloak.session import open_session, safe_dir_name
 
     cfg = _cfg_for(options)
+    if cfg.get("login_enabled") and options.get("headless"):
+        # _cfg_for forced headed so the challenge hand-off has a window.
+        schema.add_note(result, "headless was ignored: a burner login needs a "
+                                "visible browser window to clear Instagram's "
+                                "verification prompt")
     started = time.time()
     ctx = None
     try:

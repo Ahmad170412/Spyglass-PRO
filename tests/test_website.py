@@ -124,6 +124,80 @@ class MemoizationTest(unittest.TestCase):
             self.assertEqual(web._http_body("https://x.com"), "<html>hi</html>")
             self.assertEqual(sh.call_count, 1)
 
+    def test_http_body_retries_a_transient_failure(self):
+        """crt.sh and friends 429/5xx transiently; one attempt loses the source."""
+        good = mock.Mock(returncode=0, stdout="<html>ok</html>")
+        responses = [mock.Mock(returncode=22, stdout=""), good]
+        with mock.patch.object(web, "_CURL", "/usr/bin/curl"), \
+             mock.patch.object(web, "_sh", side_effect=responses) as sh, \
+             mock.patch.object(web, "_urllib_get", return_value=None), \
+             mock.patch.object(web.utils.time, "sleep"):
+            web._reset_caches()
+            self.assertEqual(web._http_body("https://crt.sh/?q=x"), "<html>ok</html>")
+            self.assertEqual(sh.call_count, 2)
+
+    def test_http_body_does_not_cache_a_failure(self):
+        """An empty result must not be cached — it would poison the whole run."""
+        with mock.patch.object(web, "_CURL", "/usr/bin/curl"), \
+             mock.patch.object(web, "_sh",
+                               return_value=mock.Mock(returncode=7, stdout="")), \
+             mock.patch.object(web, "_urllib_get", return_value=None), \
+             mock.patch.object(web.utils.time, "sleep"):
+            web._reset_caches()
+            self.assertEqual(web._http_body("https://crt.sh/?q=x"), "")
+            self.assertNotIn(("https://crt.sh/?q=x", 1_000_000), web._BODY_CACHE)
+
+    def test_http_body_gives_up_after_the_last_attempt(self):
+        with mock.patch.object(web, "_CURL", "/usr/bin/curl"), \
+             mock.patch.object(web, "_sh",
+                               return_value=mock.Mock(returncode=7, stdout="")) as sh, \
+             mock.patch.object(web, "_urllib_get", return_value=None), \
+             mock.patch.object(web.utils.time, "sleep"):
+            web._reset_caches()
+            self.assertEqual(web._http_body("https://crt.sh/?q=x"), "")
+            self.assertEqual(sh.call_count, 3)
+
+
+class RetryCallTest(unittest.TestCase):
+    """``utils.retry_call`` is what keeps a 429 from silently removing a
+    passive source from the result."""
+
+    def setUp(self):
+        self.sleep = mock.patch.object(imp("utils").time, "sleep")
+        self.sleep.start()
+        self.addCleanup(self.sleep.stop)
+
+    def test_returns_the_first_truthy_result(self):
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            return "data" if len(calls) == 2 else None
+
+        self.assertEqual(imp("utils").retry_call(flaky), "data")
+        self.assertEqual(len(calls), 2)
+
+    def test_a_first_attempt_success_is_not_retried(self):
+        calls = []
+        self.assertEqual(imp("utils").retry_call(lambda: calls.append(1) or "ok"), "ok")
+        self.assertEqual(len(calls), 1)
+
+    def test_exception_is_retried_then_gives_up_as_none(self):
+        calls = []
+
+        def boom():
+            calls.append(1)
+            raise RuntimeError("502 Bad Gateway")
+
+        self.assertIsNone(imp("utils").retry_call(boom, attempts=3))
+        self.assertEqual(len(calls), 3)
+
+    def test_backoff_grows_and_is_capped(self):
+        slept = []
+        with mock.patch.object(imp("utils").time, "sleep", side_effect=slept.append):
+            imp("utils").retry_call(lambda: None, attempts=5, base_delay=1.0, max_delay=8.0)
+        self.assertEqual(slept, [1.0, 2.0, 4.0, 8.0])
+
 
 class PhaseWhoisTest(unittest.TestCase):
     def test_registered_follows_referral(self):
