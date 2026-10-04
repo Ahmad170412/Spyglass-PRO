@@ -16,7 +16,7 @@ entities across sources (shared emails, IPs, domains, usernames).
 ## Install
 
 ```bash
-git clone <spyglass-pro-repo> && cd Spyglass-Pro
+git clone https://github.com/<owner>/Spyglass-Pro.git && cd Spyglass-Pro
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```

@@ -37,6 +37,13 @@ dependencies = [
   "phonenumbers>=8.13",
 ]
 
+# TODO(owner): replace <owner> with the real GitHub handle before publishing
+# to PyPI — an unresolved placeholder makes these links dead.
+[project.urls]
+Homepage = "https://github.com/<owner>/Spyglass-Pro"
+Source = "https://github.com/<owner>/Spyglass-Pro"
+Issues = "https://github.com/<owner>/Spyglass-Pro/issues"
+
 [project.optional-dependencies]
 dev = ["ruff>=0.8", "mypy>=1.10", "build>=1.2"]
 

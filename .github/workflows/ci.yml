@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --upgrade pip
+      - run: pip install "ruff>=0.8"
+      - name: ruff check
+        run: ruff check .
+
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The versions in pyproject's classifiers. The suite is offline and
+        # finishes in about a second, so the whole matrix is cheap.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - name: Test suite (offline, no browser)
+        # The engines are optional at runtime and absent on a clean runner;
+        # every module must still import and every degrade path must hold.
+        run: python tests/run_tests.py
+
+  package:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --upgrade pip build
+      - run: python -m build
+      - name: License and vendored engines must ship in the wheel
+        # A wheel missing LICENSE/NOTICE or spyglass_pro/modules/ installs
+        # successfully and then fails at runtime — assert the contents.
+        # `grep -q` exits on first match, which SIGPIPEs `unzip` and trips
+        # `pipefail`, so the listing is captured once and grepped as a file.
+        run: |
+          set -euo pipefail
+          whl=$(ls dist/*.whl)
+          unzip -l "$whl" > wheel-listing.txt
+          unzip -p "$whl" "*/METADATA" > wheel-metadata.txt
+          grep -q "licenses/LICENSE" wheel-listing.txt
+          grep -q "licenses/NOTICE" wheel-listing.txt
+          grep -q "^License-Expression: MIT" wheel-metadata.txt
+          for pkg in spyglass_osint instacloak lens_extender; do
+            grep -q "spyglass_pro/modules/$pkg/__init__.py" wheel-listing.txt \
+              || { echo "MISSING vendored package: $pkg"; exit 1; }
+          done
+          echo "wheel carries LICENSE, NOTICE, MIT metadata and all three vendored engines"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
