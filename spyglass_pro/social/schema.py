@@ -1,10 +1,10 @@
 """One normalized profile shape for every social platform.
 
-Instagram hands back `edge_owner_to_timeline_media`, X hands back
-`legacy`/`core` user results, and the next platform will hand back
-something else again. Adapters translate into the fields below, so the
-report writer and the dashboard renderer never learn a platform's private
-vocabulary — and adding a platform cannot mean touching either of them.
+Instagram hands back `edge_owner_to_timeline_media` and a nested `counts`
+block, and the next platform will hand back something else again.
+Adapters translate into the fields below, so the report writer and the
+dashboard renderer never learn a platform's private vocabulary — and
+adding a platform cannot mean touching either of them.
 
 Every field is optional: a platform that cannot see a field leaves it
 None and records a note instead of inventing a value. "We could not see

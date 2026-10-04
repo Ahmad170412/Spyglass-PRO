@@ -52,15 +52,15 @@ if _SCRIPTS_DIR and os.path.isdir(_SCRIPTS_DIR):
     if _SCRIPTS_DIR not in _path_parts:
         os.environ["PATH"] = os.pathsep.join([_SCRIPTS_DIR] + [p for p in _path_parts if p])
 
-# Bounded pool: a handful of concurrent heavy scans (sherlock, nmap,
-# browser runs) is plenty; extra requests queue here instead of piling
-# up subprocesses.
+# Bounded pool: a handful of concurrent heavy scans is plenty — a
+# username sweep across sherlock/maigret, a breach check, a browser
+# collection. Extra requests queue here instead of piling up work.
 JOB_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="spyglass-job")
 
-# Queue cap: heavy jobs (nmap runs 15 minutes at worst) must not
-# pile up unboundedly — a client that fires many requests gets
-# rejected once the pending queue is full instead of stalling the
-# whole server behind a mountain of scans.
+# Queue cap: heavy jobs (a full username sweep runs many minutes at
+# worst) must not pile up unboundedly — a client that fires many
+# requests gets rejected once the pending queue is full instead of
+# stalling the whole server behind a mountain of scans.
 MAX_QUEUE = max(1, int(os.environ.get("SPYGLASS_PRO_MAX_QUEUE", "16")))
 # Wall-clock budget per job. The underlying future keeps running
 # (it cannot be cancelled mid-scan), but the requester is not held

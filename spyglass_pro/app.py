@@ -13,6 +13,11 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 # uses no sessions today, but a known fallback key would allow session
 # forgery the moment any route starts using Flask sessions.
 app.config["SECRET_KEY"] = os.environ.get("SPYGLASS_PRO_SECRET") or secrets.token_hex(32)
+# Templates are cached in memory for the life of the process, so an edited
+# index.html otherwise keeps serving the old markup until a restart. This
+# only re-checks mtimes on request — it does not enable the debug console.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
 # Proxy URLs accepted by /api/proxy. Anything else (file://, gopher://,
 # junk with control characters, ...) is rejected before it reaches the
@@ -192,7 +197,7 @@ def api_spyglass_run():
 
 @app.route("/api/lens/run")
 def api_lens_run():
-    """Run Lens-Extender passive recon, optionally with an nmap scan."""
+    """Run Lens-Extender passive recon (Shodan, InternetDB, RDAP, ...)."""
     target = request.args.get("target", "")
     if not target:
         return jsonify({"error": "target required"})

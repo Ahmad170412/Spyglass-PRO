@@ -103,13 +103,6 @@ def normalize(report: dict, result: dict) -> None:
         add_note(result, note)
 
 
-def _email(profile: dict) -> str | None:
-    for key in ("public_email", "email", "business_email"):
-        if profile.get(key):
-            return profile[key]
-    return None
-
-
 def collect(page, cfg, handle: str, result: dict) -> None:
     """Run InstaCloak's collection steps against the harness's page.
 

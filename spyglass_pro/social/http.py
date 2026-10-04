@@ -10,9 +10,9 @@ Two transports, tried in order:
 2. Playwright's ``page.request`` — not CORS-bound and shares cookies, used
    as the fallback when the in-page call fails.
 
-InstaCloak's ``fetch.py`` only ever issued implicit **GET** requests (fine
-for its GET-only endpoints, fatal for X's POST guest-token call). Rather
-than fork that vendored copy, the verbs live here.
+InstaCloak's ``fetch.py`` only ever issued implicit **GET** requests.
+Rather than fork that vendored copy, the method is a parameter here, so a
+platform whose endpoint needs another verb does not need a fork.
 
 Anything that changes how a request leaves the machine belongs in this
 module, not in ``spyglass_pro/modules/``.
@@ -89,17 +89,8 @@ def request_json(page, url, headers=None, method="GET", timeout_ms=DEFAULT_TIMEO
     return _to_json(request_text(page, url, headers, method, timeout_ms))
 
 
-def get_text(page, url, headers=None, timeout_ms=DEFAULT_TIMEOUT_MS):
-    return request_text(page, url, headers, "GET", timeout_ms)
-
-
 def get_json(page, url, headers=None, timeout_ms=DEFAULT_TIMEOUT_MS):
     return request_json(page, url, headers, "GET", timeout_ms)
-
-
-def post_json(page, url, headers=None, timeout_ms=DEFAULT_TIMEOUT_MS):
-    """POST and parse JSON. X's guest-token endpoint is POST-only."""
-    return request_json(page, url, headers, "POST", timeout_ms)
 
 
 def _to_json(text):

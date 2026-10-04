@@ -7,7 +7,7 @@ Unified OSINT dashboard that wires three recon engines into one platform:
 | Engine | Purpose |
 | --- | --- |
 | **Spyglass-OSINT** | Email / username / phone / website / IP / dark-web / OPSEC / metadata recon |
-| **Social harness** | Stealth profile recon across registered platforms (Instagram, X, …) |
+| **Social harness** | Stealth profile recon across registered platforms (Instagram today) |
 | **Lens-Extender** | Long-range IP/domain recon — passive only |
 
 The **Investigation** view runs the engines in parallel and correlates
@@ -56,25 +56,12 @@ python run.py            # or: python -m spyglass_pro  /  spyglass-pro
 
 Then open <http://127.0.0.1:5000>.
 
-## Social recon
+## Instagram recon
 
-The **Social Recon** panel collects one profile across every registered
-platform. Instagram and X ship today; each platform is an adapter that
-declares its identity, capabilities and a `collect()` function, so adding
-another is a new module plus a `@register` line.
-
-| Variable | Purpose |
-| --- | --- |
-| `SPYGLASS_X_TOKEN` | X API v2 user-context token (`users.read`). **The supported path — prefer it.** |
-| `SPYGLASS_X_BEARER` | Override the public web bearer used by the fallback path |
-| `SPYGLASS_X_QUERY_ID` | Override the `UserByScreenName` GraphQL operation id |
-
-Without `SPYGLASS_X_TOKEN`, X falls back to the endpoints its own web client
-uses. That path works but is a moving target: the bearer and the GraphQL
-operation id are rotated by X on its own schedule, so the adapter resolves
-the bearer from an env override, then a baked-in value, then live discovery
-from X's bundle — a rotation degrades to a slower run rather than a failed
-one. Expect the query id to need `SPYGLASS_X_QUERY_ID` from time to time.
+The **Instagram** panel collects one profile through a stealth browser.
+Instagram ships today; each platform is an adapter that declares its
+identity, capabilities and a `collect()` function, so adding another is a
+new module plus a `@register` line.
 
 Results are honest about what was not retrieved: a follower list that needs
 a login is reported as **walled with a reason**, never as an empty list, and
@@ -106,7 +93,7 @@ and the API with no other changes.
 .venv/bin/python tests/run_tests.py
 ```
 
-239 offline checks — the three engines' own suites plus the merge layer
+269 offline checks — the three engines' own suites plus the merge layer
 (API surface, auth gate, proxy validation, job pool, case queries). No
 network and no browser required.
 
@@ -138,7 +125,7 @@ see `spyglass-pro --help`):
 ## Responsible use
 
 OSINT tools are dual-use. Only investigate systems and accounts you own or
-have explicit permission to test. Instagram and X collection may violate
+have explicit permission to test. Instagram collection may violate
 those platforms' terms of service. Because Spyglass-Pro is passive-only it
 does not touch a target's network — but the social module still drives a
 real browser against a real account, so use burner credentials you are
@@ -148,7 +135,7 @@ willing to lose. You are responsible for compliance with applicable laws.
 
 ```
 run.py                  dev entry point
-tests/                  297 offline checks (run_tests.py)
+tests/                  269 offline checks (run_tests.py)
 spyglass_pro/
   app.py                Flask routes + auth gate + proxy validation
   runner.py             job pool (queue cap, timeouts), engine dispatch

@@ -25,8 +25,8 @@ _LOCK = threading.Lock()
 class Platform:
     """One social platform the harness knows how to collect.
 
-    key      registry id used by the API and the dashboard ("x")
-    label    human name ("X")
+    key      registry id used by the API and the dashboard ("instagram")
+    label    human name ("Instagram")
     url      template taking the handle -> canonical profile URL
     capabilities
              what this platform can actually return. The dashboard uses
@@ -76,7 +76,7 @@ def load_all() -> dict:
     with _LOCK:
         if _LOADED:
             return _REGISTRY
-        for module in ("instagram", "x"):
+        for module in ("instagram",):
             try:
                 importlib.import_module(f"{__package__}.platforms.{module}")
             except Exception:  # noqa: S112 - a broken adapter must not hide the rest

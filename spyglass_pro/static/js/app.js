@@ -184,11 +184,14 @@ document.addEventListener('DOMContentLoaded', function () {
       }
 
       if (api === 'social') {
+        var picker = document.getElementById('socialPlatformRow');
         var platform = (document.getElementById('socialPlatform') || {}).value || '';
         if (!platform) {
           setLoading(btn, false);
           clearScan(resultsId);
-          showToast('Pick a platform first', 'error');
+          /* With one platform the picker is hidden, so an empty value means
+             the registry has not answered yet — not a missing choice. */
+          showToast(picker && picker.hidden ? 'Platforms are still loading' : 'Pick a platform first', 'error');
           return;
         }
         var payload = { platform: platform, handle: target };
@@ -544,6 +547,10 @@ function renderBody(data, qtype) {
 }
 
 /* ── Social (registry-driven, one layout for every platform) ── */
+/* Mirror of PROFILE_FIELDS in spyglass_pro/social/schema.py — the field
+   metadata lives in Python and this is its renderer-side copy. Keep the
+   two in step: tests/test_social.py parses this block and fails if it
+   drifts from the Python tuple (key order, label and type). */
 var SOCIAL_FIELDS = [
   { key: 'display_name', label: 'Name', type: 'text' },
   { key: 'bio', label: 'Bio', type: 'text' },
@@ -553,10 +560,11 @@ var SOCIAL_FIELDS = [
   { key: 'post_count', label: 'Posts', type: 'count' },
   { key: 'verified', label: 'Verified', type: 'bool' },
   { key: 'private', label: 'Private', type: 'bool' },
-  { key: 'joined', label: 'Joined', type: 'text' },
+  { key: 'joined', label: 'Joined', type: 'date' },
   { key: 'location', label: 'Location', type: 'text' },
   { key: 'website', label: 'Website', type: 'link' },
   { key: 'avatar_url', label: 'Avatar', type: 'image' },
+  { key: 'contact_email', label: 'Contact Email', type: 'text' },
   { key: 'external_links', label: 'External Links', type: 'list' }
 ];
 
@@ -663,17 +671,23 @@ function renderSocial(d) {
 function loadSocialPlatforms() {
   var sel = document.getElementById('socialPlatform');
   var caps = document.getElementById('socialCaps');
+  var row = document.getElementById('socialPlatformRow');
   if (!sel) return;
   apiFetch('/api/social/platforms')
     .then(function (r) { return r.json(); })
     .then(function (list) {
       if (!Array.isArray(list) || !list.length) {
         sel.innerHTML = '<option value="">no platforms available</option>';
+        if (caps) caps.textContent = 'No platform importable — the social engine failed to load.';
         return;
       }
       sel.innerHTML = list.map(function (p) {
         return '<option value="' + escapeHtml(p.key) + '">' + escapeHtml(p.label) + '</option>';
       }).join('');
+      /* One registered platform needs no choice, so the picker stays hidden
+         and the single option runs as-is. A second adapter brings the
+         control back with no edit here. */
+      if (row) row.hidden = list.length < 2;
       updateSocialCaps(list);
     })
     .catch(function () {

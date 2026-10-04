@@ -1,9 +1,9 @@
 """Report writing for every platform, from the normalized result.
 
 One report format regardless of which platform produced it: an operator
-comparing an Instagram and an X profile should not have to learn two
-layouts. Walled sections are printed as walled, with the reason — the
-same honesty rule InstaCloak applies to follower lists.
+comparing two profiles should not have to learn two layouts. Walled
+sections are printed as walled, with the reason — the same honesty rule
+InstaCloak applies to follower lists.
 """
 
 from __future__ import annotations

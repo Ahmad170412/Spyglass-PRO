@@ -165,9 +165,6 @@ def _login(page, cfg, platform, result) -> bool:
         if platform.login == "instacloak":
             from instacloak.auth import ensure_login
             return bool(ensure_login(page, cfg, result["handle"]))
-        if platform.login == "x":
-            from .platforms.x import ensure_login as x_login
-            return bool(x_login(page, cfg, result))
     except Exception as exc:
         schema.add_note(result, f"burner login failed: {_clean(exc)}")
     return False
