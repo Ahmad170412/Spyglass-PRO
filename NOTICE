@@ -1,22 +1,38 @@
-Spyglass-Pro bundles three MIT-licensed engine packages under
-spyglass_pro/modules/. Each retains its own copyright and license;
-the copies shipped here are vendored from their upstream repositories.
+Spyglass-Pro
+Copyright (c) 2026 TeamLeader. Licensed under the MIT License; see LICENSE.
 
-  spyglass_pro/modules/spyglass_osint  Spyglass-OSINT
-    Copyright (c) 2026 Atheer
-    Upstream: Spyglass-OSINT repository (MIT)
+This tree also contains three engine packages under spyglass_pro/modules/,
+authored by the same copyright holder and covered by that same MIT license.
+No separate license or NOTICE applies to them and none is required: there
+is one copyright holder for the whole of this repository, so the LICENSE
+file at the root is the complete license for every file in it.
 
-  spyglass_pro/modules/instacloak    InstaCloak
-    Copyright (c) 2026 InstaCloak contributors
-    Upstream: InstaCloak repository (MIT)
+Why modules/ is a boundary and not a merge
+------------------------------------------
+The three engines were developed as standalone projects and folded in
+unmodified. They live under spyglass_pro/modules/ rather than merged into
+the package root because runner.py puts that directory on sys.path and the
+engines import one another as top-level packages — lens_extender uses
+absolute `lens_extender.*` imports throughout. Keeping the vendored tree
+separable is what makes a future sync a directory replacement instead of a
+three-way merge, and it keeps merge-layer code from drifting into engine
+code.
 
-  spyglass_pro/modules/lens_extender  Lens-Extender
-    Copyright (c) 2026 AWNW
-    Upstream: Lens-Extender repository (MIT)
+Vendored at (the revision each copy was taken from):
 
-The full MIT license text for each engine is in its upstream repository's
-LICENSE file. See each engine's source headers for any third-party
-snippet credits carried over from upstream.
+  spyglass_pro/modules/spyglass_osint   Spyglass-OSINT     357b451
+  spyglass_pro/modules/instacloak       InstaCloak         9028d15
+  spyglass_pro/modules/lens_extender    Lens-Extender      06d451a
 
-Spyglass-Pro itself is Copyright (c) 2026 AWNW, licensed under the MIT
-License (see LICENSE).
+AUDIT-2026-10.md records where each copy diverges from the revision above,
+including the fixes that exist only in this copy and the deliberate
+rewrites. Read it before syncing anything.
+
+Third-party code
+----------------
+No third-party source is bundled here. Runtime and optional dependencies —
+Flask, httpx, rich, cryptography, phonenumbers, and the CLI tools
+(sherlock, maigret, holehe, user-scanner, blackbird, ignorant,
+phoneinfoga, exiftool, shodan) — are installed from their own sources and
+remain under their own licenses. Each engine package's `__init__.py`
+carries an SPDX identifier so the license travels with the code.

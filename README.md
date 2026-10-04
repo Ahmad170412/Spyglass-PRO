@@ -168,5 +168,7 @@ directory of the run.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE) for the bundled
-engines' copyrights.
+MIT — see [LICENSE](LICENSE). One copyright holder covers this repository
+in full, including the engines under `spyglass_pro/modules/`; [NOTICE](NOTICE)
+records where those came from and why they are kept behind a directory
+boundary.
