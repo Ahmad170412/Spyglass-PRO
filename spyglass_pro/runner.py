@@ -77,6 +77,17 @@ def _safe_error(exc):
     return " ".join(str(exc).split())[:300]
 
 
+# Sentinel key marking a result as "the server refused this, try again later"
+# rather than "the scan ran and failed". The Flask layer maps it to HTTP 429 so
+# an API client can distinguish back-pressure from a real scan error, which a
+# bare 200 carrying {"error": ...} does not allow.
+REJECTED_KEY = "_rejected"
+
+
+def _rejected(message):
+    return {"error": message, REJECTED_KEY: True}
+
+
 def run_job(fn, *args, **kwargs):
     """Run ``fn`` in the job pool and block until it finishes.
 
@@ -87,7 +98,7 @@ def run_job(fn, *args, **kwargs):
     name = getattr(fn, "__name__", "job")
     with _JOB_LOCK:
         if _PENDING >= MAX_QUEUE:
-            return {"error": f"{name} rejected: job queue full ({MAX_QUEUE} pending)"}
+            return _rejected(f"{name} rejected: job queue full ({MAX_QUEUE} pending)")
         _PENDING += 1
 
     def _done(_fut):
@@ -227,6 +238,101 @@ _SPYGLASS_HANDLERS = {
     "metadata": _sg_metadata,
 }
 
+# ─── target validation ───────────────────────────────────────────
+#
+# Recon targets are user input that ends up in subprocess arguments and in
+# queries sent to third parties. Without a check, arbitrary junk is accepted:
+# a 2KB garbage string reached the opsec panel and came back with confident
+# "geo / ISP" data for the operator's own IP, and a 700-character string was
+# handed to sherlock, which then held a worker for minutes. Both waste the
+# worker pool and produce results that look authoritative but describe the
+# wrong thing.
+#
+# Validation is per-module because the modules accept genuinely different
+# shapes: opsec ignores its target and health-checks the local machine,
+# metadata takes a filesystem path, and the rest take an identifier of a
+# specific kind. A blanket "must look like a domain" rule would break the
+# first two.
+
+# Generous ceiling: no real email, handle, domain or phone number comes close.
+MAX_TARGET_LEN = 254  # the DNS name limit, the longest of these shapes
+
+_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?"
+_DOMAIN_RE = re.compile(rf"^(?:{_LABEL}\.)+[A-Za-z]{{2,63}}$")
+_EMAIL_RE = re.compile(rf"^[A-Za-z0-9._%+-]+@{_LABEL}(?:\.{_LABEL})+$")
+_IPV4_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SHELL_METACHARS = "<>\"'\\`;|&$(){}[]"
+
+
+def _is_ipv4(value):
+    """True for a dotted quad with every octet in 0-255 (utils has no checker)."""
+    if not _IPV4_RE.match(value):
+        return False
+    return all(part.isdigit() and int(part) <= 255 for part in value.split("."))
+
+
+def _is_identifier(value):
+    """Email, phone (incl. international formats) or domain-shaped input."""
+    if not value or len(value) > MAX_TARGET_LEN:
+        return False
+    if " " in value or any(ch in value for ch in _SHELL_METACHARS):
+        return False
+    if "@" in value:
+        return bool(_EMAIL_RE.match(value))
+    if _is_ipv4(value):
+        return True
+    # A phone number: digits, spaces, and the punctuation real formats use.
+    digits = value.lstrip("+").replace(" ", "").replace("-", "")
+    if digits.isdigit() and 5 <= len(digits) <= 15:
+        return True
+    return bool(_DOMAIN_RE.match(value))
+
+
+def _validate_target(module, target):
+    """Return an error string when (module, target) cannot be a real lookup.
+
+    Empty targets are allowed only for the two modules that do not treat the
+    target as a lookup key (opsec self-check, metadata file path) and are
+    rejected everywhere else, which would otherwise silently query "".
+    """
+    if module == "opsec":
+        # opsec never reads its target: _sg_opsec calls health_check(), which
+        # inspects the local machine, and the target is only a case-store label.
+        # A long value here is not a lookup key, it is junk that produced
+        # authoritative-looking geo/ISP output about the operator's own IP.
+        if len(target) > MAX_TARGET_LEN:
+            return (f"opsec: target is ignored by this module and is too long "
+                    f"({len(target)} characters); run it with no target")
+        return None
+
+    if module == "metadata":
+        # metadata takes a filesystem path rather than an identifier.
+        if target and len(target) > 4096:
+            return f"metadata: path is implausibly long ({len(target)} characters)"
+        return None
+
+    if not target:
+        return f"{module}: a target is required"
+
+    if len(target) > MAX_TARGET_LEN:
+        return (f"{module}: target is too long ({len(target)} characters, "
+                f"maximum {MAX_TARGET_LEN})")
+
+    if module == "ip":
+        if not (_is_ipv4(target) or ":" in target):
+            return f"ip: {target!r} is not an IP address"
+        return None
+
+    if module == "username":
+        if not _USERNAME_RE.match(target):
+            return f"username: {target!r} is not a valid username"
+        return None
+
+    if not _is_identifier(target):
+        return f"{module}: {target!r} is not a valid {module} target"
+    return None
+
 
 def run_spyglass(module, target, flags):
     """Dispatch one spyglass_osint module run."""
@@ -236,6 +342,11 @@ def run_spyglass(module, target, flags):
     handler = _SPYGLASS_HANDLERS.get(module)
     if handler is None:
         return {"error": f"unknown module: {module}"}
+    # Reject implausible targets before anything reaches a subprocess or a
+    # third-party query — see _validate_target for why this is per-module.
+    invalid = _validate_target(module, target)
+    if invalid:
+        return {"error": invalid}
     progress = Progress()
     progress.add(f"starting {module} recon for {target or '(self)'}")
     _apply_spyglass_proxy()
@@ -345,6 +456,9 @@ def run_lens(target, flags):
     target = (target or "").strip()
     if not target:
         return {"error": "target required"}
+    # Lens targets are IPs or domains; the same junk-input problem applies.
+    if not _is_identifier(target):
+        return {"error": f"lens: {target!r} is not a valid IP or domain target"}
     progress = Progress()
 
     try:

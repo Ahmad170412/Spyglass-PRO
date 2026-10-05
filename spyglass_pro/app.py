@@ -64,6 +64,18 @@ def _validate_proxy(value):
     return value
 
 
+def _job_response(result):
+    """Serve a job result, mapping a queue rejection to HTTP 429.
+
+    run_job marks refusals with runner.REJECTED_KEY. Returning them as 429 lets
+    a client tell "server is busy, retry" apart from "the scan ran and failed",
+    which a 200 carrying an "error" key does not convey.
+    """
+    if isinstance(result, dict) and result.pop(runner.REJECTED_KEY, False):
+        return jsonify(result), 429
+    return jsonify(result)
+
+
 def _authorized():
     """True when no token gate is configured or the caller presented it."""
     token = os.environ.get("SPYGLASS_PRO_TOKEN")
@@ -192,7 +204,7 @@ def api_spyglass_run():
     target = request.args.get("target", "")
     flags = {key: value for key, value in request.args.items()
              if key not in ("module", "target")}
-    return jsonify(runner.run_job(runner.run_spyglass, module, target, flags))
+    return _job_response(runner.run_job(runner.run_spyglass, module, target, flags))
 
 
 @app.route("/api/lens/run")
@@ -203,14 +215,14 @@ def api_lens_run():
         return jsonify({"error": "target required"})
     flags = {key: value for key, value in request.args.items()
              if key != "target"}
-    return jsonify(runner.run_job(runner.run_lens, target, flags))
+    return _job_response(runner.run_job(runner.run_lens, target, flags))
 
 
 @app.route("/api/investigate/run", methods=["POST"])
 def api_investigate_run():
     """Correlated multi-input investigation."""
     data = request.get_json(silent=True) or {}
-    return jsonify(runner.run_job(runner.run_investigate, data))
+    return _job_response(runner.run_job(runner.run_investigate, data))
 
 
 @app.route("/api/social/platforms")

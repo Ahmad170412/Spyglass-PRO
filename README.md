@@ -21,9 +21,53 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
-Optional CLI engines (sherlock, maigret, holehe, user-scanner, ignorant,
-shodan) are discovered on `PATH` when installed; every module degrades
-gracefully when one is missing.
+### Optional CLI engines
+
+The **email**, **username** and **phone** modules are orchestrators: they shell
+out to external CLI engines rather than collecting themselves. Install them with:
+
+```bash
+python scripts/install_tools.py --check    # report which are missing
+python scripts/install_tools.py            # install the missing ones
+```
+
+This covers sherlock, maigret, holehe, ignorant, blackbird and torsocks.
+Phone lookup additionally uses `phoneinfoga` and `user-scanner`:
+
+```bash
+brew install phoneinfoga                   # macOS
+pipx install user-scanner                  # or: pip install user-scanner
+```
+
+Engines are discovered on `PATH`. `run.py` adds the venv, pipx and blackbird
+locations itself, so the server finds them even when launched from a script,
+cron job or container rather than a login shell. The script is idempotent —
+re-running it only installs what is still missing.
+
+#### What you get without them
+
+Degrading without an error is not the same as being useful, so to be explicit
+about a bare install:
+
+| Module | With engines | Without engines |
+| --- | --- | --- |
+| Email | holehe + user-scanner + blackbird sweeps, plus breach | **breach data only** |
+| Username | sherlock + maigret + blackbird sweeps, plus breach | **breach data only** |
+| Phone | phoneinfoga + ignorant, plus breach | **breach data only** |
+
+Breach checking (LeakCheck + Scylla) needs no account and no CLI tool, so it
+works on a bare install. Everything else in those three panels comes from the
+external engines — without them those panels are close to empty. **Website**,
+**IP Address** and **Full Investigation** need no external engines and work
+immediately.
+
+To confirm what the running server can see, `GET /api/status` reports a
+per-tool `true`/`false` map and a `missing_tools` list.
+
+> `holehe` and `ignorant` enumerate which platforms an email or phone number
+> is registered on. That is active account enumeration against third-party
+> services and it sits against Spyglass-Pro's passive-only posture. Only use
+> them on identifiers you own or have permission to test.
 
 ## Passive-only
 

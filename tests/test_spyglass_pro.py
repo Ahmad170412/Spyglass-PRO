@@ -126,6 +126,121 @@ class JobPoolTest(unittest.TestCase):
     def test_successful_job_returns_result(self):
         self.assertEqual(runner.run_job(lambda: {"ok": 1}), {"ok": 1})
 
+    def test_queue_rejection_is_marked_for_http_429(self):
+        """A refusal must be distinguishable from a scan that ran and failed.
+
+        Both arrive as {"error": ...}; without the sentinel an API client
+        cannot tell back-pressure from a real error and would treat a busy
+        server as a successful request with a broken payload.
+        """
+        with mock.patch.object(runner, "MAX_QUEUE", 1), \
+             mock.patch.object(runner, "_PENDING", 1):
+            result = runner.run_job(lambda: {"ok": True})
+        self.assertTrue(result[runner.REJECTED_KEY])
+
+    def test_successful_job_is_not_marked_rejected(self):
+        self.assertNotIn(runner.REJECTED_KEY, runner.run_job(lambda: {"ok": 1}))
+
+
+class TargetValidationTest(unittest.TestCase):
+    """Junk targets must be refused before they reach a subprocess.
+
+    Without this, a 2KB garbage string was accepted by the opsec panel and
+    came back with confident geo/ISP data for the operator's own IP, and a
+    700-character string was handed to sherlock, holding a worker for minutes.
+    """
+
+    def test_overlong_targets_are_rejected(self):
+        for module in ("website", "email", "phone", "username", "darkweb", "ip"):
+            err = runner._validate_target(module, "a" * 700)
+            self.assertIsNotNone(err, f"{module} accepted a 700-character target")
+            self.assertIn("too long", err)
+
+    def test_shell_metacharacters_are_rejected(self):
+        for junk in ("'; DROP TABLE users;--", "a.com; rm -rf /", "$(whoami)",
+                     "`id`", "a.com|cat /etc/passwd", "<script>alert(1)</script>"):
+            self.assertIsNotNone(runner._validate_target("website", junk),
+                                 f"accepted {junk!r}")
+
+    def test_empty_target_rejected_where_it_would_query_nothing(self):
+        for module in ("website", "email", "phone", "username", "darkweb", "ip"):
+            err = runner._validate_target(module, "")
+            self.assertIsNotNone(err)
+            self.assertIn("required", err)
+
+    def test_self_check_modules_still_accept_empty_target(self):
+        """opsec health-checks the local machine and metadata takes a path —
+        an empty target is meaningful for both, so validation must allow it."""
+        self.assertIsNone(runner._validate_target("opsec", ""))
+        self.assertIsNone(runner._validate_target("metadata", ""))
+
+    def test_opsec_rejects_an_absurd_target_it_would_ignore(self):
+        """opsec never reads its target, but a long one still produced
+        confident geo/ISP output about the operator's own IP. Empty stays
+        valid (the self-check), junk does not."""
+        err = runner._validate_target("opsec", "a" * 700)
+        self.assertIsNotNone(err)
+        self.assertIn("too long", err)
+
+    def test_ip_module_requires_an_ip(self):
+        for junk in ("not-an-ip", "999.999.999.999", "example.com"):
+            self.assertIsNotNone(runner._validate_target("ip", junk))
+        self.assertIsNone(runner._validate_target("ip", "8.8.8.8"))
+        self.assertIsNone(runner._validate_target("ip", "2001:4860:4860::8888"))
+
+    def test_legitimate_targets_are_accepted(self):
+        """The gate must not break real recon input."""
+        valid = [
+            ("website", "example.com"),
+            ("website", "sub.domain.co.uk"),
+            ("email", "user@example.com"),
+            ("email", "a.b+tag@sub.example.org"),
+            ("phone", "+14155552671"),
+            ("phone", "555-123-4567"),
+            ("username", "torproject"),
+            ("username", "some_user.name-1"),
+            ("ip", "8.8.8.8"),
+            ("darkweb", "example.com"),
+        ]
+        for module, target in valid:
+            self.assertIsNone(runner._validate_target(module, target),
+                              f"{module} wrongly rejected {target!r}")
+
+    def test_run_spyglass_rejects_before_dispatch(self):
+        """The rejection happens before a handler runs, so no subprocess starts."""
+        with mock.patch.dict(runner._SPYGLASS_HANDLERS,
+                             {"website": mock.Mock(return_value={"ok": True})}):
+            result = runner.run_spyglass("website", "a" * 700, {})
+        self.assertIn("error", result)
+        self.assertNotIn(runner.REJECTED_KEY, result)
+
+
+class QueueRejectionHttpTest(unittest.TestCase):
+    """A full queue must surface as 429, not 200."""
+
+    def setUp(self):
+        self.client = app.test_client()
+
+    def test_queue_full_returns_429(self):
+        with mock.patch.object(runner, "MAX_QUEUE", 1), \
+             mock.patch.object(runner, "_PENDING", 1):
+            resp = self.client.get("/api/spyglass/run?module=website&target=example.com")
+        self.assertEqual(resp.status_code, 429)
+        self.assertIn("queue full", resp.get_json()["error"])
+
+    def test_sentinel_is_not_leaked_to_clients(self):
+        with mock.patch.object(runner, "MAX_QUEUE", 1), \
+             mock.patch.object(runner, "_PENDING", 1):
+            resp = self.client.get("/api/spyglass/run?module=website&target=example.com")
+        self.assertNotIn(runner.REJECTED_KEY, resp.get_json())
+
+    def test_invalid_target_returns_200_with_error(self):
+        """Validation failure is a client mistake, not server back-pressure,
+        so it stays a 200 with an error body like every other scan error."""
+        resp = self.client.get("/api/spyglass/run?module=website&target=" + "a" * 700)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("error", resp.get_json())
+
 
 class StoredRunFeedbackTest(unittest.TestCase):
     """A scan that stored a run must say so.
