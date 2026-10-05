@@ -32,7 +32,6 @@ import html as _html
 import json
 import os
 import re
-import subprocess
 import tempfile
 from datetime import datetime
 from urllib.parse import quote, unquote, urlencode
@@ -168,7 +167,7 @@ def _curl_text(url, jar, timeout=20):
     if utils._PROXY:
         cmd = cmd[:1] + utils._proxy_args() + cmd[1:]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r = utils._run_text(cmd, timeout=timeout)
         if r.returncode == 0:
             return r.stdout
     except Exception:
@@ -273,7 +272,7 @@ def pwned_password(password):
     if utils._PROXY:
         cmd = cmd[:1] + utils._proxy_args() + cmd[1:]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        r = utils._run_text(cmd, timeout=15)
         for line in (r.stdout or "").splitlines():
             if ":" not in line:
                 continue
@@ -304,7 +303,7 @@ def _intelx(query, qtype, timeout=20):
     if utils._PROXY:
         cmd = cmd[:1] + utils._proxy_args() + cmd[1:]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r = utils._run_text(cmd, timeout=timeout)
         data = _loads(r.stdout)
         if not isinstance(data, dict):
             return None
@@ -344,7 +343,7 @@ def _hibp_account(email, timeout=20):
     if utils._PROXY:
         cmd = cmd[:1] + utils._proxy_args() + cmd[1:]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r = utils._run_text(cmd, timeout=timeout)
         if r.returncode == 404:
             return {"breaches": []}
         data = _loads(r.stdout)

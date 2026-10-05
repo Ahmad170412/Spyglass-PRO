@@ -1,5 +1,4 @@
 import json
-import subprocess
 import time
 
 from . import utils
@@ -59,7 +58,7 @@ def _direct_ip():
     cmd = [utils._CURL, "-s", "--noproxy", "*",
            "http://ip-api.com/json/?fields=query,country,isp,org"]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        r = utils._run_text(cmd, timeout=10)
         data = json.loads(r.stdout.strip())
         if data.get("query"):
             return {
@@ -90,9 +89,9 @@ def _dns_leak_status():
     if not utils._TORSOCKS:
         return "unverified"
     try:
-        r = subprocess.run(
+        r = utils._run_text(
             [utils._TORSOCKS, "dig", "+short", "check.torproject.org"],
-            capture_output=True, text=True, timeout=10,
+            timeout=10,
         )
         if r.returncode == 0 and r.stdout.strip():
             return "protected"

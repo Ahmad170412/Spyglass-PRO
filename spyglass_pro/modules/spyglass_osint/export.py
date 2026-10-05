@@ -9,7 +9,11 @@ from .utils import safe_name
 def json_output(result, target, qtype):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = f"spyglass_{qtype}_{safe_name(target)}_{ts}.json"
-    with open(path, "w") as f:
+    # encoding is explicit: without it the file is written in the platform's
+    # preferred codec, so an export containing an accented registrant name or a
+    # non-Latin IDN throws UnicodeEncodeError on a default Windows install
+    # (cp1252) while writing fine on Linux/macOS.
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, default=str)
     _ui.info(f"Saved {path}")
     return path
@@ -29,7 +33,7 @@ def csv_output(result, target, qtype):
         for key in row:
             if key not in fieldnames:
                 fieldnames.append(key)
-    with open(path, "w", newline="") as f:
+    with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
         w.writerows(flat)

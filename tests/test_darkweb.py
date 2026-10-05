@@ -152,7 +152,7 @@ class PwnedPasswordTest(unittest.TestCase):
 
     def test_pwned_match(self):
         body = f"{self.SUFFIX}:3789800\r\nOTHER:1\r\n"
-        with mock.patch.object(dw.subprocess, "run", return_value=_curl_mock(body)):
+        with mock.patch.object(dw.utils, "_run_text", return_value=_curl_mock(body)):
             out = dw.pwned_password("password")
         self.assertTrue(out["pwned"])
         self.assertEqual(out["count"], 3789800)
@@ -160,7 +160,7 @@ class PwnedPasswordTest(unittest.TestCase):
         self.assertNotIn("password", str(out))
 
     def test_clean(self):
-        with mock.patch.object(dw.subprocess, "run", return_value=_curl_mock("DEADBEEF:5\r\n")):
+        with mock.patch.object(dw.utils, "_run_text", return_value=_curl_mock("DEADBEEF:5\r\n")):
             out = dw.pwned_password("password")
         self.assertFalse(out["pwned"])
         self.assertEqual(out["count"], 0)
@@ -170,7 +170,7 @@ class PwnedPasswordTest(unittest.TestCase):
         self.assertIn("error", out)
 
     def test_transport_failure(self):
-        with mock.patch.object(dw.subprocess, "run", side_effect=OSError("net")):
+        with mock.patch.object(dw.utils, "_run_text", side_effect=OSError("net")):
             out = dw.pwned_password("password")
         self.assertIn("error", out)
 
@@ -192,7 +192,7 @@ class IntelXTest(unittest.TestCase):
                     {"selectvalue": "u2", "value": "user@corp.com"},
                 ]}
         with mock.patch.dict(os.environ, {"INTELX_API_KEY": "k"}, clear=False):
-            with mock.patch.object(dw.subprocess, "run",
+            with mock.patch.object(dw.utils, "_run_text",
                                    return_value=_curl_mock(json.dumps(data))):
                 out = dw._intelx("user@example.com", "email")
         self.assertEqual(out["total"], 2)
@@ -200,7 +200,7 @@ class IntelXTest(unittest.TestCase):
 
     def test_non_dict_response(self):
         with mock.patch.dict(os.environ, {"INTELX_API_KEY": "k"}, clear=False):
-            with mock.patch.object(dw.subprocess, "run", return_value=_curl_mock("[]")):
+            with mock.patch.object(dw.utils, "_run_text", return_value=_curl_mock("[]")):
                 self.assertIsNone(dw._intelx("x.com", "domain"))
 
 
@@ -218,7 +218,7 @@ class HibpTest(unittest.TestCase):
         data = [{"Name": "Adobe", "BreachDate": "2013-10-04",
                  "Domain": "adobe.com", "DataClasses": ["Email addresses"]}]
         with mock.patch.dict(os.environ, {"HIBP_API_KEY": "k"}, clear=False):
-            with mock.patch.object(dw.subprocess, "run",
+            with mock.patch.object(dw.utils, "_run_text",
                                    return_value=_curl_mock(json.dumps(data))):
                 out = dw._hibp_account("user@example.com")
         self.assertEqual(out["breaches"][0]["name"], "Adobe")
@@ -226,7 +226,7 @@ class HibpTest(unittest.TestCase):
 
     def test_404_means_clean(self):
         with mock.patch.dict(os.environ, {"HIBP_API_KEY": "k"}, clear=False):
-            with mock.patch.object(dw.subprocess, "run",
+            with mock.patch.object(dw.utils, "_run_text",
                                    return_value=_curl_mock("", returncode=404)):
                 out = dw._hibp_account("clean@example.com")
         self.assertEqual(out["breaches"], [])

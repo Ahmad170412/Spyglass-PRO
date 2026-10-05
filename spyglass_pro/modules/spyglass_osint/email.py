@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import concurrent.futures
 import re
-import subprocess
 import sys
 
 from . import utils
@@ -14,9 +13,9 @@ def _holehe(email):
     if not _check_tool("holehe", _HOLEHE):
         return set()
     try:
-        r = subprocess.run(
+        r = utils._run_text(
             [_HOLEHE, email, "--only-used"],
-            capture_output=True, text=True, timeout=120,
+            timeout=120,
             env=_proxy_env(),
         )
     except Exception:
@@ -35,9 +34,9 @@ def _us_email(email):
     if not _check_tool("user-scanner", _US):
         return {}
     try:
-        r = subprocess.run(
+        r = utils._run_text(
             [_US, "-e", email, "-v", "--only-found"],
-            capture_output=True, text=True, timeout=120, input="n\n",
+            timeout=120, input="n\n",
             env=_proxy_env(),
         )
     except Exception:
@@ -58,9 +57,9 @@ def _blackbird_email(email):
     if utils._PROXY:
         bb_cmd += _proxy_args()
     try:
-        r = subprocess.run(
+        r = utils._run_text(
             bb_cmd,
-            capture_output=True, text=True, timeout=120, cwd=_BB_DIR,
+            timeout=120, cwd=_BB_DIR,
             env=_proxy_env(),
         )
     except Exception:

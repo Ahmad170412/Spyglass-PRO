@@ -20,9 +20,19 @@ def safe_dir_name(name: str) -> str:
     Usernames come from CLI args / prompts and flow into profile and output
     directories; a crafted value like `../x` must never escape the profiles/
     or output/ roots. Real Instagram usernames pass through unchanged.
+
+    Windows reserves a set of device names -- CON, PRN, AUX, NUL, COM1-9,
+    LPT1-9 -- in any case, and a directory cannot be created with one. A
+    handle of "con" works on Linux and macOS and fails only where a user is
+    least likely to be looking for the cause, so reserved stems are prefixed.
+    The burner profile dirs are already safe because they are always built as
+    "login-<username>", which changes the stem.
     """
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip(".")
-    return cleaned or "target"
+    cleaned = cleaned or "target"
+    if re.match(r"(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$", cleaned):
+        cleaned = "_" + cleaned
+    return cleaned
 
 
 def open_session(cfg: dict, username: str):

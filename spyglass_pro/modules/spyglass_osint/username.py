@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import concurrent.futures
 import re
-import subprocess
 import sys
 
 from . import utils
@@ -17,9 +16,9 @@ def _us_username(username):
         # user-scanner 1.5.x removed --only-found (found-only is now the
         # default); passing it makes the tool exit with a deprecation error
         # before scanning anything.
-        r = subprocess.run(
+        r = utils._run_text(
             [_US, "-u", username, "-v"],
-            capture_output=True, text=True, timeout=120, input="n\n",
+            timeout=120, input="n\n",
             env=_proxy_env(),
         )
     except Exception:
@@ -37,9 +36,9 @@ def _sherlock(username):
     if not _check_tool("sherlock", _SH):
         return {}
     try:
-        r = subprocess.run(
+        r = utils._run_text(
             [_SH, username, "--print-found"],
-            capture_output=True, text=True, timeout=300,
+            timeout=300,
             env=_proxy_env(),
         )
     except Exception:
@@ -57,9 +56,9 @@ def _maigret(username):
     if not _check_tool("maigret", _MG):
         return {}
     try:
-        r = subprocess.run(
+        r = utils._run_text(
             [_MG, username, "--no-progressbar", "-C", "--top-sites", "50"],
-            capture_output=True, text=True, timeout=300,
+            timeout=300,
             env=_proxy_env(),
         )
     except Exception:
@@ -84,9 +83,9 @@ def _blackbird_username(username):
     if utils._PROXY:
         bb_cmd += _proxy_args()
     try:
-        r = subprocess.run(
+        r = utils._run_text(
             bb_cmd,
-            capture_output=True, text=True, timeout=300, cwd=_BB_DIR,
+            timeout=300, cwd=_BB_DIR,
             env=_proxy_env(),
         )
     except Exception:

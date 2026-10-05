@@ -11,9 +11,12 @@ STORE_FILE = STORE_DIR / "cases.db"
 
 def _get_conn() -> sqlite3.Connection:
     STORE_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(STORE_FILE))
+    # 30s lock timeout + WAL: the job pool runs scans concurrently, so a
+    # writer must wait for another rather than fail at sqlite3's 5s default.
+    conn = sqlite3.connect(str(STORE_FILE), timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS scans (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -41,6 +41,31 @@ def _proxy_prefix(cmd):
     return cmd
 
 
+# ─── tool output decoding ─────────────────────────────────
+
+# Every external CLI writes UTF-8 (or, for the DNS/WHOIS tools, whatever the
+# registry replied with). Passing text=True without an explicit encoding makes
+# Python decode with the *platform's* preferred codec, which is UTF-8 on
+# Linux/macOS but cp1252 on a default Windows install. That silently mangles
+# every non-ASCII character a tool returns -- an accented registrant name, a
+# non-Latin IDN label, an em dash in a description -- and on bytes cp1252
+# cannot represent at all it raises UnicodeDecodeError, turning a working scan
+# into an empty one. errors="replace" keeps a mangled byte from escalating into
+# a failed lookup, which is the right trade for recon: a slightly wrong
+# character beats no result.
+_TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
+
+
+def _run_text(cmd, **kwargs):
+    """subprocess.run with the decoding policy above applied.
+
+    Centralised so a new call site cannot reintroduce the locale dependency
+    by copying an older one.
+    """
+    kwargs = {**_TEXT, **kwargs}
+    return subprocess.run(cmd, capture_output=True, **kwargs)
+
+
 # ─── tool paths ───────────────────────────────────────────
 
 _TORSOCKS = shutil.which("torsocks")
@@ -54,12 +79,23 @@ _PHONEINFOGA = shutil.which("phoneinfoga")
 _IGNORANT = shutil.which("ignorant")
 
 if not _BB:
+    # Blackbird is a git clone, not a console script, so it is never on PATH
+    # even when installed -- these are the layouts its own installer uses.
+    # The POSIX-only paths are kept (they are the common case on Linux/macOS)
+    # but the Windows locations are now probed too: pipx on Windows installs
+    # into %USERPROFILE%\.local\bin or %USERPROFILE%\.pyx\bin, and a manual
+    # clone lands wherever the user put it. Without these, blackbird is
+    # unreachable on Windows no matter how it was installed.
+    _home = os.path.expanduser("~")
     for _p in [
-        "/opt/blackbird/blackbird.py",                        # Linux (git clone)
-        os.path.expanduser("~/.local/bin/blackbird/blackbird.py"),  # Linux (pipx-style)
-        "/opt/homebrew/bin/blackbird.py",                     # macOS (Apple Silicon)
-        "/usr/local/bin/blackbird.py",                        # macOS (Intel)
-        os.path.expanduser("~/blackbird/blackbird.py"),       # macOS/Linux (git clone)
+        "/opt/blackbird/blackbird.py",                              # Linux (git clone)
+        os.path.join(_home, ".local", "bin", "blackbird", "blackbird.py"),  # Linux (pipx-style)
+        "/opt/homebrew/bin/blackbird.py",                           # macOS (Apple Silicon)
+        "/usr/local/bin/blackbird.py",                              # macOS (Intel)
+        os.path.join(_home, "blackbird", "blackbird.py"),           # macOS/Linux (git clone)
+        os.path.join(_home, ".local", "bin", "blackbird", "blackbird.py"),   # Windows (pipx, POSIX-style)
+        os.path.join(_home, ".pyx", "bin", "blackbird", "blackbird.py"),     # Windows (pipx, native)
+        os.path.join(_home, "blackbird", "blackbird.py"),           # Windows (git clone)
     ]:
         if os.path.isfile(_p):
             _BB = _p
@@ -111,7 +147,7 @@ def _curl_json(url, timeout=15):
         if _PROXY:
             cmd = cmd[:1] + _proxy_args() + cmd[1:]
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            r = _run_text(cmd, timeout=timeout)
             if r.returncode == 0 and r.stdout.strip():
                 return json.loads(r.stdout.strip())
         except Exception:
@@ -132,9 +168,26 @@ def _check_tool(name, path):
 # ─── text / URL helpers ───────────────────────────────────
 
 def safe_name(value) -> str:
-    """Make an arbitrary target string safe for use in a filename."""
+    """Make an arbitrary target string safe for use as a filename on any OS.
+
+    Two platform rules bite beyond the character whitelist:
+
+    * Windows reserves a set of device names -- CON, PRN, AUX, NUL, COM1-9,
+      LPT1-9 -- in *any* case and *with or without an extension*. They pass
+      the whitelist untouched, so "con" survives, and every later open()
+      against that path fails on Windows while working fine on macOS and Linux.
+      A stem that matches is suffixed instead.
+    * macOS and Windows filesystems are case-insensitive by default, so
+      "EXAMPLE.COM" and "example.com" name the same file there but two
+      different files on Linux. Folding case keeps an export written on
+      Windows from overwriting the one next to it.
+    """
     s = re.sub(r"[^A-Za-z0-9._+-]+", "_", str(value)).strip("_.")
-    return s or "target"
+    s = s or "target"
+    # Reserved names are checked on the stem, so "nul.json" is caught too.
+    if re.match(r"(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$", s):
+        s = "_" + s
+    return s.lower()
 
 
 def _domain(url):
@@ -155,7 +208,7 @@ def _pick(*dicts):
 
 
 def _run(cmd, timeout=15, stdin="", proxy=True):
-    kwargs = dict(capture_output=True, text=True, timeout=timeout, input=stdin)
+    kwargs = dict(capture_output=True, timeout=timeout, input=stdin, **_TEXT)
     cmd = list(cmd)
     if proxy and _PROXY:
         base = os.path.basename(cmd[0]) if cmd else ""
@@ -182,7 +235,7 @@ def _verify(urls, max_workers=30, timeout=10, silent=False):
             cmd = ["curl", "-s", "-o", os.devnull, "-w", "%{http_code}", u]
             if _PROXY:
                 cmd = cmd[:1] + _proxy_args() + cmd[1:]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            r = _run_text(cmd, timeout=timeout)
             code = r.stdout.strip()
             return code.isdigit() and 200 <= int(code) < 400
         except Exception:

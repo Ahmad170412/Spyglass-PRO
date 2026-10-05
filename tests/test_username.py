@@ -1,5 +1,6 @@
 """Tests for username.py's tool runners (graceful degradation, no network)."""
 
+import subprocess
 import unittest
 from unittest import mock
 
@@ -15,25 +16,25 @@ class RunnerGracefulTest(unittest.TestCase):
 
     def test_sherlock_timeout_returns_empty(self):
         with mock.patch.object(uname, "_check_tool", return_value=True), \
-             mock.patch.object(uname.subprocess, "run",
-                               side_effect=uname.subprocess.TimeoutExpired("sherlock", 300)):
+             mock.patch.object(uname.utils, "_run_text",
+                               side_effect=subprocess.TimeoutExpired("sherlock", 300)):
             self.assertEqual(uname._sherlock("johnsmith"), {})
 
     def test_maigret_error_returns_empty(self):
         with mock.patch.object(uname, "_check_tool", return_value=True), \
-             mock.patch.object(uname.subprocess, "run", side_effect=OSError("boom")):
+             mock.patch.object(uname.utils, "_run_text", side_effect=OSError("boom")):
             self.assertEqual(uname._maigret("x"), {})
 
     def test_user_scanner_timeout_returns_empty(self):
         with mock.patch.object(uname, "_check_tool", return_value=True), \
-             mock.patch.object(uname.subprocess, "run",
-                               side_effect=uname.subprocess.TimeoutExpired("user-scanner", 120)):
+             mock.patch.object(uname.utils, "_run_text",
+                               side_effect=subprocess.TimeoutExpired("user-scanner", 120)):
             self.assertEqual(uname._us_username("x"), {})
 
     def test_blackbird_timeout_returns_empty(self):
         with mock.patch.object(uname, "_check_tool", return_value=True), \
-             mock.patch.object(uname.subprocess, "run",
-                               side_effect=uname.subprocess.TimeoutExpired("blackbird", 300)):
+             mock.patch.object(uname.utils, "_run_text",
+                               side_effect=subprocess.TimeoutExpired("blackbird", 300)):
             self.assertEqual(uname._blackbird_username("x"), {})
 
 

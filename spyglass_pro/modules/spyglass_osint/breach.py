@@ -1,6 +1,5 @@
 import concurrent.futures
 import json
-import subprocess
 from urllib.parse import quote
 
 from . import utils
@@ -28,7 +27,7 @@ def _leakcheck(query):
         cmd = [utils._CURL, "-s", url]
         if utils._PROXY:
             cmd = cmd[:1] + utils._proxy_args() + cmd[1:]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        r = utils._run_text(cmd, timeout=15)
         data = json.loads(r.stdout.strip())
         if data.get("success"):
             return {
@@ -49,7 +48,7 @@ def _scylla(query):
         cmd = [utils._CURL, "-s", url]
         if utils._PROXY:
             cmd = cmd[:1] + utils._proxy_args() + cmd[1:]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        r = utils._run_text(cmd, timeout=15)
         data = json.loads(r.stdout.strip())
         if isinstance(data, list) and data:
             names = set()

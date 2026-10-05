@@ -37,7 +37,11 @@ def load() -> dict:
     config = dict(DEFAULTS)
     if CONFIG_FILE.exists():
         try:
-            stored = json.loads(CONFIG_FILE.read_text())
+            # Matches the explicit utf-8 write in save(). Reading without an
+            # encoding would decode a file save() wrote as UTF-8 using the
+            # platform locale, so a non-ASCII proxy URL round-trips as mojibake
+            # on Windows -- or raises if cp1252 cannot represent the bytes.
+            stored = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             config.update({k: v for k, v in stored.items() if k in DEFAULTS})
         except (json.JSONDecodeError, OSError):
             pass
@@ -65,7 +69,10 @@ def load() -> dict:
 def save(config: dict) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
+    # encoding is explicit so an API key or proxy containing a non-ASCII
+    # character cannot fail on a cp1252 default install (Windows). The 0o600
+    # mode argument is ignored by Windows, which is why _tighten() skips it.
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(config, indent=2))
     _tighten()
 

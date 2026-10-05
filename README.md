@@ -57,12 +57,29 @@ about a bare install:
 
 Breach checking (LeakCheck + Scylla) needs no account and no CLI tool, so it
 works on a bare install. Everything else in those three panels comes from the
-external engines — without them those panels are close to empty. **Website**,
-**IP Address** and **Full Investigation** need no external engines and work
-immediately.
+external engines — without them those panels are close to empty.
+
+**Website**, **IP Address** and **Full Investigation** need no external *recon*
+engines and work immediately on any platform. One caveat is worth stating:
+they do use `dig`, `whois` and `curl`, which ship with macOS and Linux but are
+absent from a stock Windows install. Those modules still run — the DNS legs
+fall back to Python's resolver and the HTTP legs to `urllib` — but DNS record
+tables, SPF/DMARC and WHOIS come back thinner until you install the tools.
+`GET /api/status` lists exactly which are missing on your machine.
 
 To confirm what the running server can see, `GET /api/status` reports a
 per-tool `true`/`false` map and a `missing_tools` list.
+
+### Platforms
+
+macOS, Linux and Windows are all supported, and the suite runs on each. Two
+platform differences are worth knowing before you file a bug:
+
+- **Windows has no `dig` or `whois`.** Install them (or use WSL) for the full
+  DNS and WHOIS picture; without them those legs degrade as described above.
+- **Windows reserved filenames.** `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`
+  and `LPT1`-`LPT9` cannot be used as filenames in any case, so Spyglass-Pro
+  prefixes them rather than producing artifacts that fail to open there.
 
 > `holehe` and `ignorant` enumerate which platforms an email or phone number
 > is registered on. That is active account enumeration against third-party
@@ -139,7 +156,7 @@ and the API with no other changes.
 .venv/bin/python tests/run_tests.py
 ```
 
-289 offline checks — the three engines' own suites plus the merge layer
+308 offline checks — the three engines' own suites plus the merge layer
 (API surface, auth gate, proxy validation, job pool, case queries). No
 network and no browser required.
 
@@ -181,7 +198,7 @@ willing to lose. You are responsible for compliance with applicable laws.
 
 ```
 run.py                  dev entry point
-tests/                  289 offline checks (run_tests.py)
+tests/                  308 offline checks (run_tests.py)
 spyglass_pro/
   app.py                Flask routes + auth gate + proxy validation
   runner.py             job pool (queue cap, timeouts), engine dispatch

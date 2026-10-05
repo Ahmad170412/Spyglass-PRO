@@ -2,10 +2,9 @@ import hashlib
 import importlib.util
 import json
 import os
-import subprocess
 from datetime import datetime
 
-from .utils import _EXIFTOOL
+from .utils import _EXIFTOOL, _run_text
 
 
 def extract(path):
@@ -159,9 +158,9 @@ def _compute_hashes(path):
 def _exiftool_extract(path):
     """Full metadata via exiftool — the gold standard."""
     try:
-        r = subprocess.run(
+        r = _run_text(
             [_EXIFTOOL, "-j", "-G", path],
-            capture_output=True, text=True, timeout=30,
+            timeout=30,
         )
         data = json.loads(r.stdout.strip())
         if isinstance(data, list) and data:

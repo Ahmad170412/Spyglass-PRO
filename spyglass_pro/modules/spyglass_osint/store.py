@@ -81,8 +81,17 @@ def _decrypt(data: str) -> str:
 
 
 def _connect():
-    db = sqlite3.connect(_db_path())
+    # The job pool runs 3 scans concurrently and each may store its result, so
+    # several writers can hold the database at once. sqlite3's default is a 5s
+    # lock timeout and no busy handler: a slower writer (a large result JSON,
+    # or a first-time PBKDF2 derivation at 100k iterations) blocks the others
+    # past that, and they fail with "database is locked" -- a stored run
+    # silently lost. Raise the timeout and enable WAL so readers never block
+    # the writer, matching what lens_extender's store already does.
+    db = sqlite3.connect(_db_path(), timeout=30.0)
     db.row_factory = sqlite3.Row
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA busy_timeout=30000")
     return db
 
 

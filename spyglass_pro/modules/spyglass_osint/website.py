@@ -135,8 +135,7 @@ def _sh(args, timeout=15, stdin=""):
         else:
             cmd = utils._proxy_prefix(cmd)
             env = utils._proxy_env()
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                          input=stdin, env=env)
+    return utils._run_text(cmd, timeout=timeout, input=stdin, env=env)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -598,8 +597,8 @@ def _phase_shodan_ports(ips):
         shodan_data = []
         for ip in ips[:3]:
             try:
-                r = subprocess.run(["shodan", "host", ip], capture_output=True,  # noqa: S607 - PATH-checked tool
-                                   text=True, timeout=20, env=utils._proxy_env())
+                r = utils._run_text(["shodan", "host", ip],
+                                 timeout=20, env=utils._proxy_env())
             except Exception as exc:
                 shodan_data.append(f"{ip}: {exc}")
                 continue
