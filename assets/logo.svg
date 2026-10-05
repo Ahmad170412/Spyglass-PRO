@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" width="320" height="80" role="img" aria-label="Spyglass-Pro — passive-only OSINT dashboard">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="100%" style="stop-color:#1e293b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="55%" style="stop-color:#8b5cf6"/>
+      <stop offset="100%" style="stop-color:#06b6d4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background pill -->
+  <rect width="320" height="80" rx="14" fill="url(#bg)"/>
+
+  <!-- ====== ICON: spyglass lens + reticle ====== -->
+  <g transform="translate(16, 16)">
+    <!-- Signal arcs: passive collection from third-party sources -->
+    <path d="M4 24 A 20 20 0 0 1 24 4" fill="none" stroke="#6366f1" stroke-width="1.6" stroke-linecap="round" opacity="0.35"/>
+    <path d="M9 24 A 15 15 0 0 1 24 9" fill="none" stroke="#8b5cf6" stroke-width="1.6" stroke-linecap="round" opacity="0.5"/>
+    <!-- Lens barrel -->
+    <circle cx="24" cy="24" r="12.5" fill="none" stroke="url(#lens)" stroke-width="2.6"/>
+    <!-- Reticle crosshair -->
+    <line x1="24" y1="15.5" x2="24" y2="32.5" stroke="#06b6d4" stroke-width="1.1" opacity="0.55"/>
+    <line x1="15.5" y1="24" x2="32.5" y2="24" stroke="#06b6d4" stroke-width="1.1" opacity="0.55"/>
+    <!-- Iris -->
+    <circle cx="24" cy="24" r="4.6" fill="url(#lens)"/>
+    <circle cx="21.6" cy="21.6" r="1.4" fill="#e0f2fe" opacity="0.75"/>
+  </g>
+
+  <!-- Row 1: acronym (left) + tech chips (right) -->
+  <text x="60" y="37"
+        font-family="'Segoe UI', system-ui, -apple-system, sans-serif"
+        font-weight="700" font-size="21"
+        fill="url(#accent)" letter-spacing="1">SPYGLASS</text>
+
+  <rect x="192" y="23" width="40" height="15" rx="7.5" fill="#1e3a5f"/>
+  <text x="212" y="33.5"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="8.5" fill="#38bdf8" text-anchor="middle">Python</text>
+
+  <rect x="237" y="23" width="34" height="15" rx="7.5" fill="#3b2f1a"/>
+  <text x="254" y="33.5"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="8.5" fill="#fb923c" text-anchor="middle">Flask</text>
+
+  <rect x="276" y="23" width="38" height="15" rx="7.5" fill="#232a4d"/>
+  <text x="295" y="33.5"
+        font-family="system-ui, -apple-system, sans-serif"
+        font-size="8.5" fill="#a5b4fc" text-anchor="middle">OSINT</text>
+
+  <!-- Divider -->
+  <line x1="60" y1="47" x2="314" y2="47" stroke="#334155" stroke-width="0.8"/>
+
+  <!-- Row 2: repo slug + positioning, full width to itself -->
+  <text x="60" y="62"
+        font-family="'Segoe UI', system-ui, -apple-system, sans-serif"
+        font-size="10" fill="#94a3b8" letter-spacing="0.4">Ahmad170412/Spyglass-PRO · passive-only</text>
+</svg>
