@@ -28,7 +28,12 @@ def safe_dir_name(name: str) -> str:
 def open_session(cfg: dict, username: str):
     """Launch a persistent (footprint-building) stealth browser context."""
     if launch_persistent_context is None:
-        say("  error: cloakbrowser not installed. Run: pip install -r requirements.txt", "red")
+        # Not a dependency in requirements.txt on purpose: cloakbrowser pulls a
+        # ~200MB browser binary and wants a license key, so only the social
+        # panel needs it. Naming requirements.txt here sent users to a command
+        # that could not possibly fix this.
+        say("  error: cloakbrowser not installed (needed only for social recon). "
+            "Run: pip install cloakbrowser", "red")
         sys.exit(1)
 
     if (cfg.get("login_enabled") and cfg.get("login_username")
