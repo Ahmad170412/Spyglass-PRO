@@ -242,6 +242,102 @@ class QueueRejectionHttpTest(unittest.TestCase):
         self.assertIn("error", resp.get_json())
 
 
+class DeleteCaseTest(unittest.TestCase):
+    """Stored runs must be deletable, or the case table only grows."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._env = mock.patch.dict(
+            os.environ, {"SPYGLASS_HOME": self._tmp.name})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        import pathlib as _pathlib
+
+        import lens_extender.store as le_store
+        self._lens = mock.patch.multiple(
+            le_store,
+            STORE_DIR=_pathlib.Path(self._tmp.name) / "lens",
+            STORE_FILE=_pathlib.Path(self._tmp.name) / "lens" / "cases.db",
+        )
+        self._lens.start()
+        self.addCleanup(self._lens.stop)
+
+    def test_delete_removes_run_and_entities(self):
+        from spyglass_osint import store
+        run_id = store.store_result({"subdomains": ["a.example.com"]},
+                                    "website", "del-me.example.com")
+        self.assertTrue(runner.list_cases())
+        result = runner.delete_case(run_id, "website")
+        self.assertEqual(result.get("deleted"), run_id)
+        self.assertEqual(runner.list_cases(), [])
+        self.assertEqual(store.timeline("del-me.example.com", "website"), [])
+
+    def test_delete_missing_run_is_404_shaped(self):
+        result = runner.delete_case(999999, "website")
+        self.assertIn("no stored run", result.get("error", ""))
+
+    def test_delete_rejects_junk_ids(self):
+        for junk in ("", "abc", "-3", "0", None):
+            self.assertIn("error", runner.delete_case(junk, "website"))
+
+    def test_delete_endpoint_round_trip(self):
+        from spyglass_osint import store
+        run_id = store.store_result({"subdomains": ["b.example.com"]},
+                                    "website", "round-trip.example.com")
+        client = app.test_client()
+        resp = client.delete(f"/api/cases/run?id={run_id}&qtype=website")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json().get("deleted"), run_id)
+        resp = client.delete(f"/api/cases/run?id={run_id}&qtype=website")
+        self.assertEqual(resp.status_code, 404)
+
+
+class AsyncJobPollTest(unittest.TestCase):
+    """Polling a finished job must never 500.
+
+    A successful job stores ``error: None`` in its record; the poll route
+    used to call ``.startswith`` on that None and crash the exact request
+    the live dashboard makes after every async scan.
+    """
+
+    def setUp(self):
+        self.client = app.test_client()
+
+    def test_poll_finished_successful_job_returns_200(self):
+        done = {"job_id": "abc123", "name": "run_spyglass", "status": "done",
+                "created_at": 0, "result": {"summary": "ok"}, "error": None,
+                "progress": ["starting opsec recon for self"]}
+        with mock.patch.object(runner, "get_job", return_value=dict(done)):
+            resp = self.client.get("/api/job/abc123")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["status"], "done")
+
+    def test_poll_unknown_job_returns_404(self):
+        with mock.patch.object(runner, "get_job",
+                               return_value={"error": "unknown job: nope"}):
+            resp = self.client.get("/api/job/nope")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_stream_response_has_no_hop_by_hop_headers(self):
+        """waitress (the default server) 500s any response carrying a
+        ``Connection`` header, which used to make every SSE stream fail.
+        Uses a real finished job: meta + done arrive with no waiting."""
+        def job():
+            return {"summary": "ok"}
+
+        job_id = runner.submit_job(job)["job_id"]
+        deadline = time.time() + 20
+        while runner.get_job(job_id).get("status") != "done" and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(runner.get_job(job_id).get("status"), "done")
+        resp = self.client.get(f"/api/stream/{job_id}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("Connection", resp.headers)
+        body = resp.get_data(as_text=True)
+        self.assertIn("event: done", body)
+
+
 class StoredRunFeedbackTest(unittest.TestCase):
     """A scan that stored a run must say so.
 
@@ -471,6 +567,79 @@ class ListCasesTest(unittest.TestCase):
         store.store_result({"ip": "1.1.1.1"}, "ip", "example.com")
         for case in runner.list_cases():
             self.assertEqual(sorted(case), ["id", "qtype", "run_at", "target"])
+
+
+class SettingsSaveTest(unittest.TestCase):
+    """The vault must round-trip: save sets, empty clears, junk proxy 400s.
+
+    A fake store keeps the suite off the operator's real
+    ~/.lens-extender/config.json; env vars the save writes are removed on
+    teardown so one test cannot leak a key into the next.
+    """
+
+    def setUp(self):
+        self.client = app.test_client()
+        self.saved = {}
+
+        class FakeStore:
+            def load(inner_self):
+                return dict(self.saved)
+
+            def save(inner_self, cfg):
+                self.saved.clear()
+                self.saved.update(cfg)
+
+        self._store = mock.patch("spyglass_pro.app._settings_store",
+                                 return_value=FakeStore())
+        self._store.start()
+        self.addCleanup(self._store.stop)
+        for env in ("SHODAN_API_KEY", "VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY",
+                    "CENSYS_API_ID", "CENSYS_API_KEY", "GREYNOISE_API_KEY",
+                    "NVD_API_KEY", "INTELX_API_KEY", "HIBP_API_KEY"):
+            os.environ.pop(env, None)
+        self.addCleanup(os.environ.pop, "SHODAN_API_KEY", None)
+
+    def test_save_then_clear_round_trip(self):
+        resp = self.client.post("/api/settings", json={"shodan_api_key": "abc123"})
+        self.assertEqual(resp.status_code, 200)
+        snap = self.client.get("/api/settings").get_json()
+        key = next(k for k in snap["keys"] if k["key"] == "shodan_api_key")
+        self.assertTrue(key["configured"])
+        self.assertTrue(key["hint"].endswith("c123"))
+
+        resp = self.client.post("/api/settings", json={"shodan_api_key": ""})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("shodan_api_key", resp.get_json()["cleared"])
+        snap = self.client.get("/api/settings").get_json()
+        key = next(k for k in snap["keys"] if k["key"] == "shodan_api_key")
+        self.assertFalse(key["configured"])
+
+    def test_invalid_proxy_is_rejected(self):
+        resp = self.client.post("/api/settings", json={"proxy": "file:///etc/passwd"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("proxy", resp.get_json()["error"].lower())
+
+
+class AsyncSubmitTest(unittest.TestCase):
+    """Async submit answers 202 with a job id, or 429 when the queue is full."""
+
+    def setUp(self):
+        self.client = app.test_client()
+
+    def test_async_submit_returns_202_with_job_id(self):
+        with mock.patch.object(runner, "submit_job",
+                               return_value={"job_id": "job-1", "status": "running"}):
+            resp = self.client.get("/api/spyglass/run?module=website&target=example.com&async=1")
+        self.assertEqual(resp.status_code, 202)
+        self.assertEqual(resp.get_json()["job_id"], "job-1")
+
+    def test_async_submit_queue_full_returns_429_without_leaking_sentinel(self):
+        refused = {"error": "run_spyglass rejected: job queue full (16 pending)"}
+        refused[runner.REJECTED_KEY] = True
+        with mock.patch.object(runner, "submit_job", return_value=dict(refused)):
+            resp = self.client.get("/api/spyglass/run?module=website&target=example.com&async=1")
+        self.assertEqual(resp.status_code, 429)
+        self.assertNotIn(runner.REJECTED_KEY, resp.get_json())
 
 
 if __name__ == "__main__":

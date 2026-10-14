@@ -67,13 +67,18 @@ document.addEventListener('DOMContentLoaded', function () {
   navItems.forEach(function (item) {
     item.addEventListener('click', function () {
       activatePanel(item.getAttribute('data-panel'));
+      /* Platform shortcut tabs share one panel: highlight the clicked tab
+         (not the first one for that panel) and preselect its platform. */
+      var plat = item.getAttribute('data-platform');
+      if (plat) {
+        navItems.forEach(function (n) { n.classList.remove('active'); });
+        item.classList.add('active');
+        selectSocialPlatform(plat);
+      }
     });
   });
 
-  /* ── Proxy ── */
-  var proxyInput = document.getElementById('proxyInput');
-  var proxyApply = document.getElementById('proxyApply');
-  var proxyClear = document.getElementById('proxyClear');
+  /* ── Proxy status (topbar indicator; editing lives in Settings) ── */
   var proxyStatus = document.getElementById('proxyStatus');
 
   function updateProxyUI(proxy) {
@@ -87,37 +92,6 @@ document.addEventListener('DOMContentLoaded', function () {
       dot.className = 'dot idle';
       label.textContent = 'No Proxy';
     }
-  }
-
-  if (proxyApply && proxyInput) {
-    proxyApply.addEventListener('click', function () {
-      apiFetch('/api/proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ proxy: proxyInput.value.trim() })
-      }).then(function (r) { return r.json(); }).then(function (data) {
-        updateProxyUI(data.proxy);
-        showToast('Proxy updated: ' + (data.proxy || 'none'), 'success');
-      }).catch(function (err) {
-        showToast('Error: ' + err.message, 'error');
-      });
-    });
-  }
-
-  if (proxyClear && proxyInput) {
-    proxyClear.addEventListener('click', function () {
-      proxyInput.value = '';
-      apiFetch('/api/proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ proxy: '' })
-      }).then(function (r) { return r.json(); }).then(function () {
-        updateProxyUI(null);
-        showToast('Proxy cleared', 'info');
-      }).catch(function (err) {
-        showToast('Error: ' + err.message, 'error');
-      });
-    });
   }
 
   /* ── Generic run dispatcher ── */
@@ -139,7 +113,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
       var btn = form.querySelector('.run-btn');
       setLoading(btn, true);
-      showScanning(resultsId, target);
+      var preflightQ = qtype || (api === 'investigate' ? 'investigate' : api);
+      showScanning(resultsId, target, false, preflightQ);
 
       var flags = {};
       form.querySelectorAll('[data-flag]').forEach(function (el) {
@@ -161,13 +136,10 @@ document.addEventListener('DOMContentLoaded', function () {
         /* The option checkboxes (json/csv/report/store) are flags, not
            target fields — they have to ride along or they do nothing. */
         Object.keys(flags).forEach(function (k) { payload[k] = flags[k]; });
-        apiFetch('/api/investigate/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        }).then(function (r) { return r.json(); })
-          .then(function (data) { setLoading(btn, false); displayResults(resultsId, data, false, 'investigate'); })
-          .catch(function (err) { setLoading(btn, false); clearScan(resultsId); showToast('Error: ' + err.message, 'error'); });
+        runAsyncScan({
+          url: '/api/investigate/run', method: 'POST', body: payload,
+          resultsId: resultsId, target: target, qtype: 'investigate', btn: btn
+        });
         return;
       }
 
@@ -176,26 +148,33 @@ document.addEventListener('DOMContentLoaded', function () {
         params.set('module', qtype);
         params.set('target', target);
         Object.keys(flags).forEach(function (k) { params.set(k, flags[k]); });
-        apiFetch('/api/spyglass/run?' + params.toString())
-          .then(function (r) { return r.json(); })
-          .then(function (data) { setLoading(btn, false); displayResults(resultsId, data, false, qtype); })
-          .catch(function (err) { setLoading(btn, false); clearScan(resultsId); showToast('Error: ' + err.message, 'error'); });
+        runAsyncScan({
+          url: '/api/spyglass/run?' + params.toString(), method: 'GET',
+          resultsId: resultsId, target: target, qtype: qtype, btn: btn
+        });
         return;
       }
 
       if (api === 'social') {
-        var picker = document.getElementById('socialPlatformRow');
         var platform = (document.getElementById('socialPlatform') || {}).value || '';
         if (!platform) {
           setLoading(btn, false);
           clearScan(resultsId);
-          /* With one platform the picker is hidden, so an empty value means
-             the registry has not answered yet — not a missing choice. */
-          showToast(picker && picker.hidden ? 'Platforms are still loading' : 'Pick a platform first', 'error');
+          /* The tab sets the platform, so an empty value means the
+             registry has not answered yet — not a missing choice. */
+          showToast('Platforms are still loading', 'error');
           return;
         }
         var payload = { platform: platform, handle: target };
         Object.keys(flags).forEach(function (k) { payload[k] = flags[k]; });
+        /* Keyless adapters (Mastodon, Bluesky) fetch public JSON — browser
+           flags are inert server-side, so strip them instead of sending
+           options the engine will ignore. */
+        if (SOCIAL_META[platform] && !SOCIAL_META[platform].browser) {
+          delete payload.headless;
+          delete payload.deep;
+          delete payload.media;
+        }
         var burnerOn = document.getElementById('burnerEnabled');
         var burnerUser = document.getElementById('burnerUser');
         var burnerPass = document.getElementById('burnerPass');
@@ -208,28 +187,21 @@ document.addEventListener('DOMContentLoaded', function () {
           showToast('Burner login needs a username and password', 'error');
           return;
         }
-        apiFetch('/api/social/run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        })
-          .then(function (r) { return r.json(); })
-          .then(function (data) { setLoading(btn, false); displayResults(resultsId, data, false, 'social'); })
-          .catch(function (err) { setLoading(btn, false); clearScan(resultsId); showToast('Error: ' + err.message, 'error'); });
+        runAsyncScan({
+          url: '/api/social/run', method: 'POST', body: payload,
+          resultsId: resultsId, target: target, qtype: 'social', btn: btn
+        });
         return;
       }
 
       if (api === 'lens') {
         params.set('target', target);
         Object.keys(flags).forEach(function (k) { params.set(k, flags[k]); });
-        apiFetch('/api/lens/run?' + params.toString())
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            setLoading(btn, false);
-            displayResults(resultsId, data, false, 'lens');
-            if (flags.alsoSpyglass) runSpyglassIp(target, resultsId);
-          })
-          .catch(function (err) { setLoading(btn, false); clearScan(resultsId); showToast('Error: ' + err.message, 'error'); });
+        runAsyncScan({
+          url: '/api/lens/run?' + params.toString(), method: 'GET',
+          resultsId: resultsId, target: target, qtype: 'lens', btn: btn,
+          onDone: function () { if (flags.alsoSpyglass) runSpyglassIp(target, resultsId); }
+        });
         return;
       }
 
@@ -240,17 +212,19 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   function runSpyglassIp(target, resultsId) {
-    showScanning(resultsId, target, true);
-    apiFetch('/api/spyglass/run?module=ip&target=' + encodeURIComponent(target))
-      .then(function (r) { return r.json(); })
-      .then(function (data) { displayResults(resultsId, data, true, 'ip'); })
-      .catch(function (err) { clearScan(resultsId); showToast('Error: ' + err.message, 'error'); });
+    showScanning(resultsId, target, true, 'ip');
+    runAsyncScan({
+      url: '/api/spyglass/run?module=ip&target=' + encodeURIComponent(target),
+      method: 'GET', resultsId: resultsId, target: target,
+      qtype: 'ip', append: true, btn: null
+    });
   }
 
   /* ── Load status on startup ── */
   apiFetch('/api/status').then(function (r) { return r.json(); }).then(function (data) {
     updateProxyUI(data.proxy || '');
     updateEngineTags(data);
+    updateOverview(data);
   }).catch(function () {
     showToast('Server unreachable', 'error');
   });
@@ -268,6 +242,14 @@ document.addEventListener('DOMContentLoaded', function () {
   var casesList = document.getElementById('casesList');
   if (casesList) {
     casesList.addEventListener('click', function (e) {
+      /* Delete button first: it lives inside the row, so it must win
+         over the row-click timeline loader below. */
+      var del = e.target.closest && e.target.closest('[data-del-id]');
+      if (del) {
+        e.stopPropagation();
+        deleteCase(del.getAttribute('data-del-id'), del.getAttribute('data-del-qtype') || '', del);
+        return;
+      }
       var row = e.target.closest && e.target.closest('tr.case-row');
       if (!row) return;
       var target = row.getAttribute('data-target') || '';
@@ -283,11 +265,15 @@ document.addEventListener('DOMContentLoaded', function () {
   var casesDetail = document.getElementById('casesDetail');
   if (casesDetail) {
     casesDetail.addEventListener('click', function (e) {
-      if (e.target.id !== 'casesResetQtype') return;
-      e.preventDefault();
-      var sel = document.getElementById('casesQtype');
-      if (sel) sel.value = '';
-      casesQuery('timeline');
+      if (e.target.id === 'casesResetQtype') {
+        e.preventDefault();
+        var sel = document.getElementById('casesQtype');
+        if (sel) sel.value = '';
+        casesQuery('timeline');
+        return;
+      }
+      if (e.target.id === 'dossierCopy') { copyDossier(); return; }
+      if (e.target.id === 'dossierDl') { downloadDossier(); return; }
     });
   }
   var caseButtons = [
@@ -300,9 +286,19 @@ document.addEventListener('DOMContentLoaded', function () {
     if (btn) btn.addEventListener('click', function () { casesQuery(pair[1]); });
   });
 
-  /* ── Load cases + platform registry ── */
+  /* ── Load cases + platform registry + settings vault ── */
   loadCases();
   loadSocialPlatforms();
+  loadSettings();
+  var settingsSave = document.getElementById('settingsSave');
+  if (settingsSave) settingsSave.addEventListener('click', saveSettings);
+  var settingsReload = document.getElementById('settingsReload');
+  if (settingsReload) settingsReload.addEventListener('click', loadSettings);
+  var settingsGrid = document.getElementById('settingsGrid');
+  if (settingsGrid) {
+    settingsGrid.addEventListener('click', settingsGridClick);
+    settingsGrid.addEventListener('keydown', settingsGridKeydown);
+  }
 });
 
 /* ── API Helpers ── */
@@ -323,36 +319,9 @@ var STATUS = null;
 
 function updateEngineTags(data) {
   STATUS = data || null;
-  var tags = document.getElementById('moduleTags');
-  if (!tags || !STATUS) return;
-  var degraded = STATUS.degraded || {};
-  var missingFor = {};
-  Object.keys(degraded).forEach(function (qtype) {
-    degraded[qtype].forEach(function (tool) { missingFor[tool] = true; });
-  });
-  var platformCount = (STATUS.platforms || []).length;
-  tags.querySelectorAll('.mod-tag').forEach(function (tag) {
-    var key = tag.getAttribute('data-mod');
-    var info = (STATUS.engines || {})[key] || {};
-    /* `problem` is what earns the degraded styling; `notes` is only tooltip
-       detail. "2 platforms registered" is not a problem. */
-    var problem = false;
-    var notes = [];
-    if (info.available === false) {
-      problem = true;
-      notes.push('not importable — its dependencies are missing');
-    } else if (key === 'spyglass' && Object.keys(missingFor).length) {
-      problem = true;
-      notes.push('partial recon: missing ' + Object.keys(missingFor).sort().join(', '));
-    } else if (key === 'social') {
-      notes.push(platformCount + ' platform' + (platformCount === 1 ? '' : 's') +
-                 ' registered' + (platformCount ? '' : ' — none importable'));
-      if (!platformCount) problem = true;
-    }
-    tag.classList.toggle('degraded', problem);
-    tag.title = notes.length ? (info.label || key) + ' — ' + notes.join(' · ')
-                             : (info.label || key);
-  });
+  // The topbar engine pills are gone (replaced by the Overview data-source
+  // grid), but the partial-recon banner still needs its status snapshot —
+  // an early return here once silently killed it. Never gate this on DOM.
   renderMissingNotice();
 }
 
@@ -394,8 +363,12 @@ function setLoading(btn, loading) {
   }
 }
 
-/* ── In-progress scanning card ── */
-var SCAN_VERBS = ['Scanning', 'Probing', 'Enumerating', 'Correlating', 'Analyzing', 'Fingerprinting', 'Verifying'];
+/* ── In-progress scanning card: live engine log, not theater ──
+ *
+ * The radar/bar only mean "the server is working" (indeterminate). The
+ * live log lines below them are REAL — pushed by the engine as each leg
+ * runs, via /api/stream/<job_id> (SSE), with /api/job/<id> polling as
+ * fallback when streams are full. The rotating fake verbs are gone. */
 var activeScans = {};
 
 function fmtElapsed(ms) {
@@ -407,45 +380,280 @@ function fmtElapsed(ms) {
 function clearScan(resultsId) {
   var scan = activeScans[resultsId];
   if (scan) {
+    scan.cancelled = true;
     clearInterval(scan.timer);
-    clearInterval(scan.verbTimer);
+    if (scan.pollTimer) clearTimeout(scan.pollTimer);
+    if (scan.abort) { try { scan.abort.abort(); } catch (e) {} }
     delete activeScans[resultsId];
   }
   var card = document.getElementById('scanning-' + resultsId);
   if (card) card.remove();
 }
 
-function showScanning(resultsId, target, append) {
+function showScanning(resultsId, target, append, qtype) {
   clearScan(resultsId);
   var container = document.getElementById(resultsId);
   if (!container) return;
   var start = Date.now();
-  var verbIdx = 0;
   var safeTarget = target ? String(target).slice(0, 120) : '';
   var html = '<div class="result-card scan-card" id="scanning-' + resultsId + '">' +
     '<div class="scan-radar"><span></span><span></span><span></span><i></i></div>' +
     '<div class="scan-title">Scan in progress</div>' +
     (safeTarget ? '<div class="scan-target">' + escapeHtml(safeTarget) + '</div>' : '') +
-    '<div class="scan-status"><span class="scan-verb">Scanning</span><span class="ellipsis"></span></div>' +
+    '<div class="preflight" id="preflight-' + resultsId + '">' + preflightHtml(qtype || '') + '</div>' +
+    '<div class="scan-status"><span class="live-dot"></span><span class="scan-live">Connecting to live log…</span></div>' +
     '<div class="scan-bar"><span></span></div>' +
-    '<div class="scan-shimmer w70"></div>' +
-    '<div class="scan-shimmer w45"></div>' +
+    '<div class="scan-log" id="scanlog-' + resultsId + '"><div class="scan-log-lines"></div></div>' +
     '<div class="scan-timer">0s elapsed</div>' +
     '</div>';
   if (append) container.insertAdjacentHTML('afterbegin', html);
   else container.innerHTML = html;
   var card = document.getElementById('scanning-' + resultsId);
-  var verbEl = card ? card.querySelector('.scan-verb') : null;
   var timerEl = card ? card.querySelector('.scan-timer') : null;
   activeScans[resultsId] = {
     timer: setInterval(function () {
       if (timerEl) timerEl.textContent = fmtElapsed(Date.now() - start) + ' elapsed';
     }, 1000),
-    verbTimer: setInterval(function () {
-      verbIdx = (verbIdx + 1) % SCAN_VERBS.length;
-      if (verbEl) verbEl.textContent = SCAN_VERBS[verbIdx];
-    }, 2400)
+    cancelled: false,
+    lines: 0
   };
+  // Fresh tool status in the background: the pre-flight line above renders
+  // from cache instantly, then corrects itself if anything changed.
+  refreshPreflight(resultsId, qtype || '');
+}
+
+function appendScanLog(resultsId, line) {
+  var scan = activeScans[resultsId];
+  var box = document.getElementById('scanlog-' + resultsId);
+  if (!box) return;
+  var lines = box.querySelector('.scan-log-lines');
+  if (!lines) return;
+  var div = document.createElement('div');
+  div.className = 'run-log-line';
+  div.textContent = line;
+  lines.appendChild(div);
+  while (lines.children.length > 40) lines.removeChild(lines.firstChild);
+  box.scrollTop = box.scrollHeight;
+  if (scan) {
+    scan.lines += 1;
+    var card = document.getElementById('scanning-' + resultsId);
+    var live = card ? card.querySelector('.scan-live') : null;
+    if (live) live.textContent = 'Live · ' + scan.lines + ' line' + (scan.lines === 1 ? '' : 's');
+  }
+}
+
+/* ── Pre-flight power check ──
+ *
+ * Rendered from the cached /api/status (+ vault snapshot) before every
+ * scan: which legs will actually run and which are skipped. A partial
+ * result must never look like a complete one, so the scan says so up
+ * front instead of after. */
+var PREFLIGHT_TOOLS = {
+  email: ['holehe', 'user-scanner', 'blackbird'],
+  username: ['user-scanner', 'sherlock', 'maigret', 'blackbird'],
+  phone: ['ignorant', 'phoneinfoga'],
+  website: ['dig', 'whois', 'curl'],
+  ip: ['shodan'],
+  metadata: ['exiftool'],
+  opsec: [],
+  social: []
+};
+var PREFLIGHT_KEYS = {
+  lens: [['shodan_api_key', 'Shodan'], ['virustotal_api_key', 'VirusTotal'],
+         ['abuseipdb_api_key', 'AbuseIPDB'], ['censys_api_key', 'Censys'],
+         ['greynoise_api_key', 'GreyNoise'], ['nvd_api_key', 'NVD']],
+  ip: [['shodan_api_key', 'Shodan'], ['virustotal_api_key', 'VirusTotal'],
+       ['abuseipdb_api_key', 'AbuseIPDB']],
+  darkweb: [['intelx_api_key', 'IntelX'], ['hibp_api_key', 'HIBP']]
+};
+var SETTINGS_CACHE = null;
+
+function settingsKeySet(key) {
+  if (!SETTINGS_CACHE || !SETTINGS_CACHE.keys) return null;
+  for (var i = 0; i < SETTINGS_CACHE.keys.length; i++) {
+    if (SETTINGS_CACHE.keys[i].key === key) return !!SETTINGS_CACHE.keys[i].configured;
+  }
+  return null;
+}
+
+function preflightHtml(qtype) {
+  var tools = (STATUS && STATUS.tools) || {};
+  var degraded = (STATUS && STATUS.degraded) || {};
+  var needed = PREFLIGHT_TOOLS[qtype];
+  var keySpecs = PREFLIGHT_KEYS[qtype];
+  // Investigation spans every leg: summarise across all tool groups.
+  if (qtype === 'investigate') {
+    var all = [];
+    Object.keys(PREFLIGHT_TOOLS).forEach(function (k) {
+      (PREFLIGHT_TOOLS[k] || []).forEach(function (t) { if (all.indexOf(t) === -1) all.push(t); });
+    });
+    needed = all;
+  }
+  var bits = [];
+  var full = true;
+  if (needed) {
+    var have = needed.filter(function (t) { return tools[t]; });
+    var missing = needed.filter(function (t) { return !tools[t]; });
+    if (missing.length) full = false;
+    bits.push(have.length + '/' + needed.length + ' tools detected' +
+      (missing.length ? ' — missing ' + missing.join(', ') : ' — ' + needed.join(', ')));
+  } else if (degraded[qtype]) {
+    full = false;
+    bits.push('missing ' + degraded[qtype].join(', '));
+  }
+  if (keySpecs) {
+    var haveK = keySpecs.filter(function (spec) { return settingsKeySet(spec[0]); });
+    var unknown = keySpecs.some(function (spec) { return settingsKeySet(spec[0]) === null; });
+    if (haveK.length < keySpecs.length) full = false;
+    bits.push('enrichment ' + haveK.length + '/' + keySpecs.length + ' keys' +
+      (haveK.length ? ' (' + haveK.map(function (s) { return s[1]; }).join(', ') + ')' : '') +
+      (unknown ? ' — open Settings to check' : ''));
+  }
+  if (!bits.length) {
+    if (!STATUS) return '<span class="power-badge partial">CHECKING TOOLS…</span>';
+    return '<span class="power-badge full">FULL POWER</span><span class="preflight-detail">keyless legs + breach data</span>';
+  }
+  return '<span class="power-badge ' + (full ? 'full' : 'partial') + '">' +
+    (full ? 'FULL POWER' : 'PARTIAL POWER') + '</span>' +
+    '<span class="preflight-detail">' + escapeHtml(bits.join(' · ')) + '</span>';
+}
+
+function refreshPreflight(resultsId, qtype) {
+  apiFetch('/api/status').then(function (r) { return r.json(); }).then(function (data) {
+    updateProxyUI(data.proxy || '');
+    updateEngineTags(data);
+    var el = document.getElementById('preflight-' + resultsId);
+    if (el) el.innerHTML = preflightHtml(qtype);
+  }).catch(function () {});
+}
+
+/* ── Async scan engine: submit non-blocking, stream the live log ── */
+function sseHeaders() {
+  var headers = {};
+  if (API_TOKEN) headers['Authorization'] = 'Bearer ' + API_TOKEN;
+  return headers;
+}
+
+function runAsyncScan(opts) {
+  var url = opts.url, method = opts.method || 'GET';
+  var resultsId = opts.resultsId, qtype = opts.qtype || '';
+  var btn = opts.btn || null, append = !!opts.append;
+  var fetchOpts = { headers: sseHeaders() };
+  if (method === 'POST') {
+    var body = opts.body || {};
+    body.async = '1';
+    fetchOpts.method = 'POST';
+    fetchOpts.headers['Content-Type'] = 'application/json';
+    fetchOpts.body = JSON.stringify(body);
+  } else {
+    url += (url.indexOf('?') === -1 ? '?' : '&') + 'async=1';
+  }
+  apiFetch(url, fetchOpts).then(function (r) { return r.json(); }).then(function (data) {
+    if (data && data.job_id) {
+      streamJob(data.job_id, opts);
+    } else {
+      // Synchronous answer (queue rejection, validation error, …).
+      setLoading(btn, false);
+      displayResults(resultsId, data, append, qtype);
+      if (opts.onDone) opts.onDone(data);
+    }
+  }).catch(function (err) {
+    var scan = activeScans[resultsId];
+    if (scan && scan.cancelled) return;
+    setLoading(btn, false);
+    clearScan(resultsId);
+    showToast('Error: ' + err.message, 'error');
+  });
+}
+
+function finishAsyncScan(opts, result) {
+  var scan = activeScans[opts.resultsId];
+  if (scan && scan.cancelled) return;
+  setLoading(opts.btn || null, false);
+  displayResults(opts.resultsId, result, !!opts.append, opts.qtype || '');
+  if (opts.onDone) opts.onDone(result);
+}
+
+function streamJob(jobId, opts) {
+  var resultsId = opts.resultsId;
+  var scan = activeScans[resultsId];
+  if (!scan) return;
+  var controller = null;
+  try { controller = new AbortController(); scan.abort = controller; } catch (e) {}
+  var streamUrl = '/api/stream/' + encodeURIComponent(jobId);
+  var headers = sseHeaders();
+  fetch(streamUrl, { headers: headers, signal: controller ? controller.signal : undefined })
+    .then(function (resp) {
+      if (!resp.ok || !resp.body) { pollJob(jobId, opts, 0); return null; }
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buf = '';
+      var finished = false;
+      function pump() {
+        return reader.read().then(function (chunk) {
+          var cur = activeScans[resultsId];
+          if (!cur || cur.cancelled) { try { reader.cancel(); } catch (e) {} return; }
+          if (chunk.done) {
+            if (!finished) pollJob(jobId, opts, cur.lines);
+            return;
+          }
+          buf += decoder.decode(chunk.value, { stream: true });
+          var frames = buf.split('\n\n');
+          buf = frames.pop();
+          frames.forEach(function (frame) {
+            var event = null, payload = null;
+            frame.split('\n').forEach(function (ln) {
+              if (ln.indexOf('event:') === 0) event = ln.slice(6).trim();
+              else if (ln.indexOf('data:') === 0) payload = ln.slice(5).trim();
+            });
+            if (!event || payload === null) return; // : ping keep-alive
+            if (event === 'log') {
+              try { appendScanLog(resultsId, JSON.parse(payload).line); } catch (e) {}
+            } else if (event === 'done') {
+              finished = true;
+              try { reader.cancel(); } catch (e) {}
+              var result = {};
+              try { result = JSON.parse(payload); } catch (e) {}
+              finishAsyncScan(opts, result);
+            } else if (event === 'error') {
+              finished = true;
+              try { reader.cancel(); } catch (e) {}
+              pollJob(jobId, opts, (activeScans[resultsId] || {}).lines || 0);
+            }
+          });
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function () {
+      var cur = activeScans[resultsId];
+      if (cur && !cur.cancelled) pollJob(jobId, opts, cur.lines || 0);
+    });
+}
+
+function pollJob(jobId, opts, seen) {
+  var resultsId = opts.resultsId;
+  var scan = activeScans[resultsId];
+  if (!scan || scan.cancelled) return;
+  apiFetch('/api/job/' + encodeURIComponent(jobId)).then(function (r) { return r.json(); }).then(function (job) {
+    var cur = activeScans[resultsId];
+    if (!cur || cur.cancelled) return;
+    if (job.error && job.error.indexOf('unknown job') === 0) {
+      finishAsyncScan(opts, { error: job.error });
+      return;
+    }
+    var lines = job.progress || [];
+    for (var i = seen; i < lines.length; i++) appendScanLog(resultsId, lines[i]);
+    if (job.status === 'done') {
+      finishAsyncScan(opts, job.result || { error: job.error || 'empty result' });
+      return;
+    }
+    cur.pollTimer = setTimeout(function () { pollJob(jobId, opts, lines.length); }, 1500);
+  }).catch(function (err) {
+    var cur = activeScans[resultsId];
+    if (!cur || cur.cancelled) return;
+    cur.pollTimer = setTimeout(function () { pollJob(jobId, opts, seen); }, 3000);
+  });
 }
 
 function displayResults(containerId, data, append, qtype) {
@@ -483,6 +691,9 @@ function displayResults(containerId, data, append, qtype) {
               '<div class="artifact-item"><span class="artifact-kind">case</span>' +
               '<code>run #' + escapeHtml(String(data.stored_run_id)) +
               ' — visible under Stored Cases</code></div></div>';
+    }
+    if (data.normalized) {
+      html += renderNormalized(data.normalized);
     }
     html += renderBody(data, qtype || '');
     var raw = typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data);
@@ -667,40 +878,80 @@ function renderSocial(d) {
   return html;
 }
 
+/* ── Platform shortcut tabs: three entries, one shared panel ──
+ *
+ * The sidebar tab IS the picker — there is no platform dropdown in the
+ * form (it used to duplicate the tabs and disagree with them). The active
+ * tab writes its key into the hidden #socialPlatform field, updates the
+ * name line + placeholder + capability hint, and the submit handler reads
+ * that field back. Unknown keys are remembered until the registry answers
+ * so an early click never silently runs the wrong platform. */
+var pendingSocialPlatform = null;
+var SOCIAL_LABELS = {};
+var SOCIAL_META = {};
+
+function selectSocialPlatform(key) {
+  var sel = document.getElementById('socialPlatform');
+  if (!sel) { pendingSocialPlatform = key; return; }
+  if (!SOCIAL_LABELS[key]) { pendingSocialPlatform = key; return; }
+  pendingSocialPlatform = null;
+  sel.value = key;
+  var name = document.getElementById('socialPlatformName');
+  if (name) name.textContent = SOCIAL_LABELS[key];
+  setSocialPlaceholder(key);
+  updateSocialCaps(null);
+}
+
+function setSocialPlaceholder(key) {
+  var input = document.getElementById('socialHandle');
+  if (!input) return;
+  var hints = {
+    instagram: 'instagram username',
+    mastodon: 'user or user@instance',
+    bluesky: 'user.bsky.social'
+  };
+  input.placeholder = hints[key] || 'handle';
+}
+
 /* ── Platform list (registry-driven) ── */
 function loadSocialPlatforms() {
   var sel = document.getElementById('socialPlatform');
   var caps = document.getElementById('socialCaps');
-  var row = document.getElementById('socialPlatformRow');
   if (!sel) return;
   apiFetch('/api/social/platforms')
     .then(function (r) { return r.json(); })
     .then(function (list) {
       if (!Array.isArray(list) || !list.length) {
-        sel.innerHTML = '<option value="">no platforms available</option>';
+        sel.value = '';
         if (caps) caps.textContent = 'No platform importable — the social engine failed to load.';
         return;
       }
-      sel.innerHTML = list.map(function (p) {
-        return '<option value="' + escapeHtml(p.key) + '">' + escapeHtml(p.label) + '</option>';
-      }).join('');
-      /* One registered platform needs no choice, so the picker stays hidden
-         and the single option runs as-is. A second adapter brings the
-         control back with no edit here. */
-      if (row) row.hidden = list.length < 2;
-      updateSocialCaps(list);
+      SOCIAL_LABELS = {};
+      SOCIAL_META = {};
+      list.forEach(function (p) {
+        SOCIAL_LABELS[p.key] = p.label || p.key;
+        SOCIAL_META[p.key] = { browser: p.browser !== false, login: p.login || 'none' };
+      });
+      /* Default to the first tab's platform unless a tab was already
+         clicked while the registry was in flight. */
+      var want = pendingSocialPlatform || sel.value || 'instagram';
+      pendingSocialPlatform = null;
+      if (!SOCIAL_LABELS[want]) want = list[0].key;
+      sel.value = want;
+      var name = document.getElementById('socialPlatformName');
+      if (name) name.textContent = SOCIAL_LABELS[want];
+      setSocialPlaceholder(want);
+      showCaps(list, want);
     })
     .catch(function () {
-      sel.innerHTML = '<option value="">could not load platforms</option>';
+      sel.value = '';
     });
-
-  sel.addEventListener('change', function () { updateSocialCaps(null); });
 }
 
 function updateSocialCaps(platforms) {
   var caps = document.getElementById('socialCaps');
   var sel = document.getElementById('socialPlatform');
-  if (!caps || !sel) return;
+  if (!caps || !sel || !sel.value) return;
   if (!platforms) {
     return apiFetch('/api/social/platforms').then(function (r) { return r.json(); })
       .then(function (list) { showCaps(list, sel.value); });
@@ -712,9 +963,22 @@ function showCaps(platforms, key) {
   var caps = document.getElementById('socialCaps');
   if (!caps) return;
   var match = (platforms || []).filter(function (p) { return p.key === key; })[0];
+  var keyless = !!match && match.browser === false;
+  /* Burner login only exists on browser platforms that declare it —
+     keyless adapters (Mastodon, Bluesky) have no login row to show. */
+  var burnerRow = document.getElementById('burnerRow');
+  if (burnerRow) burnerRow.style.display = (match && match.login && match.login !== 'none') ? '' : 'none';
+  /* Headless / Deep / Download Media drive the stealth browser, which
+     keyless adapters never launch — offering them there implies stories
+     and media downloads that do not exist on those tabs. */
+  var form = document.getElementById('form-social');
+  var browserOpts = form ? form.querySelectorAll('[data-browser-only]') : [];
+  for (var i = 0; i < browserOpts.length; i++) {
+    browserOpts[i].style.display = keyless ? 'none' : '';
+  }
   if (!match) { caps.textContent = ''; return; }
   caps.textContent = 'Can return: ' + match.capabilities.join(', ') +
-    (match.login === 'none' ? ' · no burner login' : ' · burner login supported');
+    (match.login === 'none' ? (match.browser === false ? ' · keyless, no browser needed' : ' · no burner login') : ' · burner login supported');
 }
 
 function renderSection(title, inner) {
@@ -738,12 +1002,71 @@ function renderKv(obj, labels) {
   return html + '</tbody></table>';
 }
 
-function renderChips(items) {
+function renderChips(items, cap) {
   if (!items || !items.length) return '';
+  var rows = items.slice(0, cap || 60);
   var html = '<div class="chip-group">';
-  items.forEach(function (item) {
+  rows.forEach(function (item) {
     html += '<span class="chip">' + escapeHtml(String(item)) + '</span>';
   });
+  html += '</div>';
+  if (items.length > rows.length) {
+    html += '<p class="dim">+ ' + (items.length - rows.length) + ' more in raw JSON</p>';
+  }
+  return html;
+}
+
+/* ── Normalized facts block (spyglass_pro.facts) ──
+ *
+ * Every engine answers in its own shape; facts.normalize derives one
+ * stable entities/facts block per run. This renders it at the top of
+ * every result so the skimmable answer no longer hides inside the
+ * per-engine sections below. Absent block = render nothing: an errored
+ * or pre-facts run must not gain an empty "findings" section.
+ * Medium-confidence facts are badged, never hidden — agreement-derived
+ * counts are weaker evidence than direct third-party values. */
+function renderNormalized(block) {
+  if (!block || typeof block !== 'object') return '';
+  var facts = Array.isArray(block.facts) ? block.facts : [];
+  var entities = Array.isArray(block.entities) ? block.entities : [];
+  if (!facts.length && !entities.length) return '';
+  var html = '<div class="res-section facts-block"><span class="res-section-title">Key findings</span>';
+  if (facts.length) {
+    html += '<table class="kv-table facts-table"><tbody>';
+    facts.forEach(function (f) {
+      if (!f || typeof f !== 'object') return;
+      var val = f.value;
+      var cell = (typeof val === 'boolean') ? (val ? 'yes' : 'no')
+        : (typeof val === 'number' && isFinite(val)) ? val.toLocaleString()
+        : escapeHtml(String(val === null || val === undefined ? '—' : val));
+      var conf = (f.confidence && f.confidence !== 'high')
+        ? ' <span class="fact-conf fact-conf-medium">' + escapeHtml(String(f.confidence)) + '</span>' : '';
+      html += '<tr><th>' + escapeHtml(String(f.label || f.key || 'fact')) + '</th><td>' + cell +
+              ' <span class="dim">· ' + escapeHtml(String(f.source || '')) + '</span>' + conf + '</td></tr>';
+    });
+    html += '</tbody></table>';
+  } else {
+    html += '<p class="dim">No discrete findings — see sections below.</p>';
+  }
+  if (entities.length) {
+    var byKind = {};
+    entities.forEach(function (e) {
+      if (!e || e.value === undefined) return;
+      var kind = String(e.kind || 'other');
+      (byKind[kind] = byKind[kind] || []).push(String(e.value));
+    });
+    html += '<span class="res-section-title">Related entities</span>';
+    Object.keys(byKind).sort().forEach(function (kind) {
+      var vals = byKind[kind].filter(function (v, i, a) { return a.indexOf(v) === i; });
+      html += '<p class="res-line dim">' + escapeHtml(kind) + ' (' + vals.length + ')</p>' +
+              renderChips(vals, 24);
+    });
+  }
+  if (block.provenance && block.provenance.engine) {
+    html += '<p class="dim">via ' + escapeHtml(String(block.provenance.engine)) + '</p>';
+  } else if (block.engine) {
+    html += '<p class="dim">via ' + escapeHtml(String(block.engine)) + '</p>';
+  }
   return html + '</div>';
 }
 
@@ -1045,8 +1368,10 @@ function renderGeneric(data, skip) {
   var html = '';
   Object.keys(data).forEach(function (key) {
     if (skip.indexOf(key) !== -1) return;
+    /* The normalized block has its own renderer at the top of the card —
+       dumping it again as generic key/value rows would double every fact. */
     if (key === 'progress' || key === 'summary' || key === 'artifacts' ||
-        key === 'stored_run_id' || key === 'report_dir') return;
+        key === 'stored_run_id' || key === 'report_dir' || key === 'normalized') return;
     html += renderValue(data[key], key);
   });
   return html;
@@ -1107,6 +1432,195 @@ function copyResult(containerId) {
   }
 }
 
+function updateOverview(status) {
+  if (!status) return;
+  var tools = status.tools || {};
+  var names = Object.keys(tools);
+  var have = names.filter(function (k) { return tools[k]; }).length;
+  var e = document.getElementById('statTools');
+  if (e) e.textContent = names.length ? have + '/' + names.length : '—';
+  var q = document.getElementById('statQueue');
+  if (q && status.queue) q.textContent = status.queue.pending + '/' + status.queue.max_queue;
+  renderToolGrid();
+  apiFetch('/api/cases').then(function (r) { return r.json(); }).then(function (data) {
+    var c = document.getElementById('statCases');
+    if (c) c.textContent = Array.isArray(data) ? data.length : '—';
+  }).catch(function () {});
+  apiFetch('/api/settings').then(function (r) { return r.json(); }).then(function (data) {
+    SETTINGS_CACHE = data || SETTINGS_CACHE;
+    var k = document.getElementById('statKeys');
+    if (k && data) k.textContent = (data.configured || 0) + '/' + (data.total || 9);
+    renderToolGrid();
+  }).catch(function () {});
+}
+
+/* ── Overview: per-tool data-source grid ──
+ *
+ * One coarse "engines online" number hides that each module leans on a
+ * different set of tools — email needs 3, username 4, metadata 1. This
+ * lists every module's actual legs with on/off dots, from the same
+ * /api/status + vault snapshot the pre-flight check reads. */
+var TOOL_ROWS = [
+  { label: 'Email', tools: ['holehe', 'user-scanner', 'blackbird'], note: '+ breach data' },
+  { label: 'Username', tools: ['user-scanner', 'sherlock', 'maigret', 'blackbird'], note: '+ breach data' },
+  { label: 'Phone', tools: ['ignorant', 'phoneinfoga'], note: '+ breach data' },
+  { label: 'Website', tools: ['dig', 'whois', 'curl'] },
+  { label: 'IP address', tools: ['shodan'] },
+  { label: 'Dark web', keys: [['intelx_api_key', 'IntelX'], ['hibp_api_key', 'HIBP']], note: 'Ahmia + breach keyless' },
+  { label: 'Enrichment', keys: [['shodan_api_key', 'Shodan'], ['virustotal_api_key', 'VirusTotal'], ['abuseipdb_api_key', 'AbuseIPDB'], ['censys_api_key', 'Censys'], ['greynoise_api_key', 'GreyNoise'], ['nvd_api_key', 'NVD']] },
+  { label: 'Metadata', tools: ['exiftool'] },
+  { label: 'Social', platforms: true }
+];
+
+function renderToolGrid() {
+  var grid = document.getElementById('toolGrid');
+  if (!grid) return;
+  var tools = (STATUS && STATUS.tools) || {};
+  var platforms = (STATUS && STATUS.platforms) || [];
+  grid.innerHTML = TOOL_ROWS.map(function (row) {
+    var dots = '', frac = '';
+    if (row.platforms) {
+      var n = platforms.length;
+      dots = '<span class="tool-dots"><i class="' + (n ? 'on' : 'off') + '" title="' + n + ' platform(s) registered"></i></span>';
+      frac = n + ' platform' + (n === 1 ? '' : 's');
+    } else if (row.tools) {
+      var have = row.tools.filter(function (t) { return tools[t]; });
+      dots = '<span class="tool-dots">' + row.tools.map(function (t) {
+        return '<i class="' + (tools[t] ? 'on' : 'off') + '" title="' + escapeHtml(t) + (tools[t] ? ' detected' : ' missing') + '"></i>';
+      }).join('') + '</span>';
+      frac = have.length + '/' + row.tools.length;
+    } else if (row.keys) {
+      var known = row.keys.filter(function (spec) { return settingsKeySet(spec[0]) !== null; });
+      var set = row.keys.filter(function (spec) { return settingsKeySet(spec[0]); });
+      dots = '<span class="tool-dots">' + row.keys.map(function (spec) {
+        var st = settingsKeySet(spec[0]);
+        return '<i class="' + (st ? 'on' : 'off') + '" title="' + escapeHtml(spec[1]) + (st ? ' key set' : (st === null ? ' — open Settings' : ' key missing')) + '"></i>';
+      }).join('') + '</span>';
+      frac = known.length ? set.length + '/' + row.keys.length + ' keys' : '—';
+    }
+    return '<div class="tool-row"><span class="tool-row-name">' + escapeHtml(row.label) +
+      (row.note ? ' <span class="tool-note">' + escapeHtml(row.note) + '</span>' : '') +
+      '</span>' + dots + '<span class="tool-frac">' + escapeHtml(frac) + '</span></div>';
+  }).join('');
+}
+
+/* ── Settings vault: masked read, write-only keys ── */
+function loadSettings() {
+  var grid = document.getElementById('settingsGrid');
+  var status = document.getElementById('settingsStatus');
+  if (!grid) return;
+  if (status) status.innerHTML = '<span class="dot active"></span><span>Loading vault…</span>';
+  apiFetch('/api/settings').then(function (r) { return r.json(); }).then(function (data) {
+    SETTINGS_CACHE = data || null;
+    renderToolGrid();
+    var keys = (data && data.keys) || [];
+    grid.innerHTML = keys.map(function (item) {
+      return '<div class="settings-field' + (item.configured ? ' configured' : '') + '">' +
+        '<div class="settings-meta"><label>' + escapeHtml(item.label) + '</label>' +
+        '<span class="key-state">' + (item.configured ? '● set ' + escapeHtml(item.hint || '') : '○ not set') + '</span>' +
+        '<span class="key-help">' + escapeHtml(item.help || '') + '</span></div>' +
+        '<input type="password" data-key="' + escapeHtml(item.key) + '" placeholder="' +
+        (item.configured ? '•••••• — enter new to replace' : 'paste key') + '" autocomplete="off" spellcheck="false" />' +
+        '<div class="settings-row-actions">' +
+        '<button type="button" class="btn btn-sm btn-primary" data-save-key="' + escapeHtml(item.key) + '">Save key</button>' +
+        (item.configured ? '<button type="button" class="btn btn-sm btn-outline" data-clear-key="' + escapeHtml(item.key) + '">Clear</button>' : '') +
+        '</div></div>';
+    }).join('');
+    var proxy = document.getElementById('settingsProxy');
+    if (proxy && data) proxy.value = data.proxy || '';
+    if (status) {
+      status.innerHTML = '<span class="dot idle"></span><span>' +
+        escapeHtml(String(data.configured || 0)) + ' of ' + escapeHtml(String(data.total || keys.length)) +
+        ' keys configured — blank fields are left untouched</span>';
+    }
+    var k = document.getElementById('statKeys');
+    if (k && data) k.textContent = (data.configured || 0) + '/' + (data.total || 9);
+  }).catch(function () {
+    if (status) status.innerHTML = '<span class="dot error"></span><span>Could not load vault.</span>';
+  });
+}
+
+function postSettings(payload, btn, busyText) {
+  var original = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = busyText || 'Saving…'; }
+  return apiFetch('/api/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+    .then(function (res) {
+      if (btn) { btn.disabled = false; btn.textContent = original; }
+      if (!res.ok) { showToast('Error: ' + (res.data.error || 'save failed'), 'error'); return res; }
+      loadSettings();
+      apiFetch('/api/status').then(function (r) { return r.json(); }).then(function (s) {
+        updateProxyUI(s.proxy || '');
+        updateEngineTags(s);
+        updateOverview(s);
+      }).catch(function () {});
+      return res;
+    }).catch(function (err) {
+      if (btn) { btn.disabled = false; btn.textContent = original; }
+      showToast('Error: ' + err.message, 'error');
+      throw err;
+    });
+}
+
+/* Per-row delegation: the grid is re-rendered on every load, so one
+   listener on the container outlives the buttons inside it. */
+function settingsGridClick(e) {
+  var saveBtn = e.target.closest ? e.target.closest('[data-save-key]') : null;
+  var clearBtn = e.target.closest ? e.target.closest('[data-clear-key]') : null;
+  if (saveBtn) {
+    var key = saveBtn.getAttribute('data-save-key');
+    var grid = document.getElementById('settingsGrid');
+    var input = grid ? grid.querySelector('input[data-key="' + key + '"]') : null;
+    var val = input ? input.value.trim() : '';
+    if (!val) { showToast('Paste a key first', 'error'); return; }
+    var payload = {};
+    payload[key] = val;
+    postSettings(payload, saveBtn, 'Saving…').then(function (res) {
+      if (res && res.ok) showToast('Key saved', 'success');
+    });
+    return;
+  }
+  if (clearBtn) {
+    var ckey = clearBtn.getAttribute('data-clear-key');
+    var cpayload = {};
+    cpayload[ckey] = '';
+    postSettings(cpayload, clearBtn, 'Clearing…').then(function (res) {
+      if (res && res.ok) showToast('Key cleared', 'info');
+    });
+  }
+}
+
+function settingsGridKeydown(e) {
+  if (e.key !== 'Enter') return;
+  var input = e.target.closest ? e.target.closest('input[data-key]') : null;
+  if (!input) return;
+  e.preventDefault();
+  var grid = document.getElementById('settingsGrid');
+  var btn = grid ? grid.querySelector('[data-save-key="' + input.getAttribute('data-key') + '"]') : null;
+  if (btn) btn.click();
+}
+
+function saveSettings() {
+  var grid = document.getElementById('settingsGrid');
+  var payload = {};
+  if (grid) {
+    grid.querySelectorAll('input[data-key]').forEach(function (el) {
+      // Only send touched fields: blank = leave untouched (not clear).
+      if (el.value && el.value.trim()) payload[el.getAttribute('data-key')] = el.value.trim();
+    });
+  }
+  var proxy = document.getElementById('settingsProxy');
+  if (proxy) payload.proxy = proxy.value.trim();
+  if (!Object.keys(payload).length) { showToast('Nothing to save — paste a key first', 'error'); return; }
+  var btn = document.getElementById('settingsSave');
+  postSettings(payload, btn, 'Saving…').then(function (res) {
+    if (res && res.ok) showToast('Settings saved (' + (res.data.configured || 0) + ' keys set)', 'success');
+  }).catch(function () {});
+}
+
 function loadCases() {
   var container = document.getElementById('casesList');
   if (!container) return;
@@ -1117,13 +1631,16 @@ function loadCases() {
         container.innerHTML = '<p class="dim">No stored cases yet. Run a query with "Store in Cases" enabled.</p>';
         return;
       }
-      var html = '<table><thead><tr><th>Target</th><th>Type</th><th>Run ID</th><th>Time</th></tr></thead><tbody>';
+      var html = '<table><thead><tr><th>Target</th><th>Type</th><th>Run ID</th><th>Time</th><th></th></tr></thead><tbody>';
       data.forEach(function (c) {
         html += '<tr class="case-row" data-target="' + escapeHtml(c.target) +
                 '" data-qtype="' + escapeHtml(c.qtype) +
                 '" title="Load this target\'s timeline"><td>' + escapeHtml(c.target) +
                 '</td><td>' + escapeHtml(c.qtype) + '</td><td>' + c.id + '</td><td>' +
-                escapeHtml(c.run_at) + '</td></tr>';
+                escapeHtml(c.run_at) + '</td>' +
+                '<td class="case-del-cell"><button type="button" class="case-del" data-del-id="' + c.id +
+                '" data-del-qtype="' + escapeHtml(c.qtype) +
+                '" title="Delete this stored run">✕</button></td></tr>';
       });
       html += '</tbody></table>';
       container.innerHTML = html;
@@ -1136,6 +1653,22 @@ function loadCases() {
 /* ── Cases: diff / timeline / dossier ──
    Read-only queries against the store's entity index, so they answer
    inline instead of going through the scan job pool. */
+
+function deleteCase(runId, qtype, btn) {
+  if (!runId) return;
+  if (!window.confirm('Delete stored run #' + runId + ' (' + (qtype || 'unknown type') + ')? Its entities leave the index too.')) return;
+  if (btn) btn.disabled = true;
+  apiFetch('/api/cases/run?id=' + encodeURIComponent(runId) + '&qtype=' + encodeURIComponent(qtype || ''), {
+    method: 'DELETE'
+  }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+    .then(function (res) {
+      if (!res.ok) { showToast('Error: ' + (res.data.error || 'delete failed'), 'error'); return; }
+      showToast('Deleted stored run #' + runId, 'success');
+      loadCases();
+    }).catch(function (err) {
+      showToast('Error: ' + err.message, 'error');
+    });
+}
 
 function casesQuery(kind) {
   var target = (document.getElementById('casesTarget') || {}).value || '';
@@ -1226,15 +1759,35 @@ function renderCaseTimeline(d, qtype) {
     var ents = run.entities || [];
     html += '<tr><td>' + escapeHtml(run.run_at) + '</td><td>' + escapeHtml(run.qtype) +
             '</td><td>' + ents.length + '</td></tr>';
+    /* Per-run entities inline: counts alone forced a second query to see
+       what actually changed, which is what the diff view is for. Cap the
+       chips so a 400-entity website run stays readable. */
+    if (ents.length) {
+      var shown = ents.slice(0, 12);
+      html += '<tr class="case-ents-row"><td colspan="3"><div class="chip-group">';
+      shown.forEach(function (e) {
+        html += '<span class="chip">' + escapeHtml(e) + '</span>';
+      });
+      html += '</div>';
+      if (ents.length > shown.length) {
+        html += '<p class="dim">+ ' + (ents.length - shown.length) + ' more</p>';
+      }
+      html += '</td></tr>';
+    }
   });
   html += '</tbody></table>';
   return html;
 }
 
+/* The last dossier payload, kept for the Copy / Download buttons below.
+   Set on every profile render; never read when a profile failed. */
+var lastDossier = null;
+
 function renderCaseProfile(d, qtype) {
   if (!d) return '<p class="dim">No data.</p>';
   var results = d.results || {};
   if (!Object.keys(results).length && qtype) return emptyCases(d, qtype, 'profile');
+  lastDossier = d;
   var html = '<h3>Dossier — ' + escapeHtml(d.target || '') + '</h3>';
   html += '<p class="res-line">Generated <span class="status-ok">' +
           escapeHtml(d.generated || '') + '</span> · schema v' +
@@ -1243,6 +1796,11 @@ function renderCaseProfile(d, qtype) {
   var types = Object.keys(results);
   html += '<p class="res-line">Query types stored: <span class="status-ok">' +
           (types.length ? escapeHtml(types.join(', ')) : 'none') + '</span></p>';
+  if (types.length) {
+    html += '<div class="export-btns">' +
+            '<button type="button" class="btn btn-sm btn-outline" id="dossierCopy">Copy dossier JSON</button>' +
+            '<button type="button" class="btn btn-sm btn-outline" id="dossierDl">Download dossier</button></div>';
+  }
   var entities = d.entities || {};
   Object.keys(entities).forEach(function (kind) {
     html += entityList(kind, entities[kind]);
@@ -1251,6 +1809,39 @@ function renderCaseProfile(d, qtype) {
     html += '<p class="dim">No entities extracted for this target.</p>';
   }
   return html;
+}
+
+function dossierFilename() {
+  var t = (lastDossier && lastDossier.target) || 'dossier';
+  var safe = String(t).toLowerCase().replace(/[^a-z0-9._+-]+/g, '_').slice(0, 60)
+    .replace(/\.{2,}/g, '_').replace(/^[._-]+/, '');
+  if (!safe) safe = 'dossier';
+  return 'dossier-' + safe + '.json';
+}
+
+function copyDossier() {
+  if (!lastDossier) return;
+  var text = JSON.stringify(lastDossier, null, 2);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function () {
+      showToast('Dossier copied', 'success');
+    }).catch(function (err) {
+      showToast('Error: ' + err.message, 'error');
+    });
+  } else {
+    showToast('Clipboard unavailable in this browser', 'error');
+  }
+}
+
+function downloadDossier() {
+  if (!lastDossier) return;
+  var blob = new Blob([JSON.stringify(lastDossier, null, 2)], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = dossierFilename();
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 100);
 }
 
 function escapeHtml(str) {

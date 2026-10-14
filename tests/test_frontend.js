@@ -114,5 +114,153 @@ check('entity values are escaped', !entityInjection.includes('<script'), entityI
 
 check('escapeHtml handles quotes', escapeHtml('a"b') === 'a&quot;b');
 
+console.log('== partial-recon notice ==');
+
+/* The topbar pills are gone, but the Overview banner must still render:
+   updateEngineTags once returned early without them and the banner died
+   silently. Stub only getElementById; everything else stays as-is. */
+(function () {
+  const realGet = sandbox.document.getElementById;
+  const notice = { innerHTML: '', style: {} };
+  sandbox.document.getElementById = (id) => (id === 'toolNotice' ? notice : null);
+  try {
+    sandbox.updateEngineTags({ degraded: { email: ['holehe'] }, tools: {}, platforms: [], engines: {} });
+    check('notice names the missing tool without the pills', notice.innerHTML.includes('holehe'), notice.innerHTML);
+    check('notice becomes visible', notice.style.display === 'block', notice.style.display);
+    sandbox.updateEngineTags({ degraded: {}, tools: {}, platforms: [], engines: {} });
+    check('notice hides when nothing is missing', notice.style.display === 'none', notice.style.display);
+  } finally {
+    sandbox.document.getElementById = realGet;
+  }
+})();
+
+console.log('== normalized facts block ==');
+
+const normBlock = {
+  engine: 'spyglass_osint',
+  facts: [
+    { key: 'accounts_total', label: 'Accounts found', value: 2, source: 'spyglass_osint', confidence: 'high' },
+    { key: 'accounts_single', label: 'Accounts (single engine)', value: 1, source: 'spyglass_osint', confidence: 'medium' },
+    { key: 'proxy_configured', label: 'Proxy configured', value: false, source: 'self-check', confidence: 'high' },
+  ],
+  entities: [
+    { kind: 'email', value: 'a@x.com', source: 'target' },
+    { kind: 'domain', value: 'x.com', source: 'spyglass_osint' },
+  ],
+};
+const normHtml = sandbox.renderNormalized(normBlock);
+check('facts render with labels', normHtml.includes('Accounts found') && normHtml.includes('2'), normHtml);
+check('medium confidence is badged, not hidden', normHtml.includes('medium'), normHtml);
+check('false bool renders as no, not blank', normHtml.includes('>no<') || normHtml.includes('>no '), normHtml);
+check('entities grouped by kind', normHtml.includes('email (1)') && normHtml.includes('x.com'), normHtml);
+check('source shown per fact', normHtml.includes('spyglass_osint'), normHtml);
+check('absent block renders nothing', sandbox.renderNormalized(null) === '', 'null block');
+check('empty block renders nothing', sandbox.renderNormalized({ facts: [], entities: [] }) === '', 'empty block');
+check('injection in fact value is escaped',
+      !sandbox.renderNormalized({ facts: [{ key: 'x', label: 'X', value: '<script>alert(1)</script>', source: 's', confidence: 'high' }], entities: [] }).includes('<script>'));
+
+console.log('== timeline entity chips ==');
+const tlChips = renderCaseTimeline(
+  { target: 'a@b.com', runs: [{ run_at: '2026-10-03', qtype: 'email', entities: ['email:a@b.com', 'domain:x.com'] }] }, '');
+check('timeline shows entity values inline', tlChips.includes('domain:x.com'), tlChips);
+
+console.log('== dossier actions ==');
+const dossierHtml = renderCaseProfile(
+  { target: 'a@b.com', generated: 'now', schema_version: 1, spyglass_version: 'x',
+    entities: { emails: ['a@b.com'] }, results: { email: { ok: 1 } } }, '');
+check('dossier offers copy', dossierHtml.includes('dossierCopy'), dossierHtml);
+check('dossier offers download', dossierHtml.includes('dossierDl'), dossierHtml);
+
+console.log('== results wire up the facts block ==');
+(function () {
+  const realGet = sandbox.document.getElementById;
+  const boxes = {};
+  sandbox.document.getElementById = (id) => {
+    if (id === 'toolNotice') return { innerHTML: '', style: {} };
+    if (String(id).indexOf('scanning-') === 0) return null;
+    if (!boxes[id]) boxes[id] = { innerHTML: '', insertAdjacentHTML(pos, html) { this.innerHTML += html; } };
+    return boxes[id];
+  };
+  try {
+    const withNorm = { summary: 'Email recon for a@b.com', foo: 'bar',
+      normalized: { engine: 'spyglass_osint',
+        facts: [{ key: 'a', label: 'Accounts found', value: 2, source: 's', confidence: 'high' }],
+        entities: [{ kind: 'email', value: 'a@b.com', source: 'target' }] } };
+    sandbox.displayResults('boxA', withNorm, false, 'email');
+    check('displayResults renders Key findings when normalized is present',
+      boxes.boxA.innerHTML.includes('Key findings'), boxes.boxA.innerHTML.slice(0, 200));
+    const withoutNorm = { summary: 'Email recon for a@b.com', foo: 'bar' };
+    sandbox.displayResults('boxB', withoutNorm, false, 'email');
+    check('displayResults renders no Key findings without a block',
+      !boxes.boxB.innerHTML.includes('Key findings'), boxes.boxB.innerHTML.slice(0, 200));
+  } finally {
+    sandbox.document.getElementById = realGet;
+  }
+})();
+
+console.log('== dossier filename ==');
+sandbox.lastDossier = { target: '../../etc/passwd' };
+check('dossier filename strips path traversal',
+  !sandbox.dossierFilename().includes('/') && !sandbox.dossierFilename().includes('..'),
+  sandbox.dossierFilename());
+sandbox.lastDossier = { target: 'User@Example.COM' };
+check('dossier filename is JSON for the target',
+  sandbox.dossierFilename().endsWith('.json') && sandbox.dossierFilename().includes('user'),
+  sandbox.dossierFilename());
+
+console.log('== keyless tabs hide browser options ==');
+(function () {
+  const realGet = sandbox.document.getElementById;
+  const labels = [{ style: {} }, { style: {} }, { style: {} }];
+  const form = { querySelectorAll: (sel) => (sel === '[data-browser-only]' ? labels : []) };
+  const burnerRow = { style: {} };
+  sandbox.document.getElementById = (id) => (
+    id === 'form-social' ? form : id === 'burnerRow' ? burnerRow
+    : id === 'socialCaps' ? { textContent: '' } : null);
+  try {
+    const list = [
+      { key: 'instagram', label: 'Instagram', login: 'instacloak', browser: true, capabilities: [] },
+      { key: 'mastodon', label: 'Mastodon', login: 'none', browser: false, capabilities: [] },
+      { key: 'bluesky', label: 'Bluesky', login: 'none', browser: false, capabilities: [] },
+    ];
+    sandbox.showCaps(list, 'mastodon');
+    check('keyless tab hides headless/deep/media',
+      labels.every((l) => l.style.display === 'none'), JSON.stringify(labels.map((l) => l.style.display)));
+    sandbox.showCaps(list, 'instagram');
+    check('instagram tab keeps browser options',
+      labels.every((l) => l.style.display === ''), JSON.stringify(labels.map((l) => l.style.display)));
+    sandbox.showCaps(list, 'bluesky');
+    check('keyless tab hides the burner row', burnerRow.style.display === 'none', burnerRow.style.display);
+  } finally {
+    sandbox.document.getElementById = realGet;
+  }
+})();
+(function () {
+  const realGet = sandbox.document.getElementById;
+  const fields = {
+    socialPlatform: { value: 'instagram' },
+    socialPlatformName: { textContent: '' },
+    socialHandle: { placeholder: '' },
+    socialCaps: { textContent: '' },
+    burnerRow: { style: {} },
+  };
+  sandbox.document.getElementById = (id) => fields[id] || null;
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = () => Promise.reject(new Error('no network in tests'));
+  try {
+    sandbox.SOCIAL_LABELS = { instagram: 'Instagram', mastodon: 'Mastodon', bluesky: 'Bluesky' };
+    sandbox.selectSocialPlatform('mastodon');
+    check('tab sets the hidden field', fields.socialPlatform.value === 'mastodon', fields.socialPlatform.value);
+    check('tab updates the name line', fields.socialPlatformName.textContent === 'Mastodon', fields.socialPlatformName.textContent);
+    check('tab rewrites the placeholder', fields.socialHandle.placeholder.includes('instance'), fields.socialHandle.placeholder);
+    sandbox.selectSocialPlatform('nope');
+    check('unknown platform keeps the current tab instead of blanking it',
+      fields.socialPlatform.value === 'mastodon', fields.socialPlatform.value);
+  } finally {
+    sandbox.document.getElementById = realGet;
+    sandbox.fetch = realFetch;
+  }
+})();
+
 console.log(`\n${'='.repeat(40)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

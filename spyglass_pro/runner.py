@@ -11,6 +11,11 @@ exposes one runner per engine plus a small job pool:
 * runners collect progress lines from the engines' own terminal UIs or
   log callbacks and return them as ``progress`` in the result JSON, next
   to a one-line ``summary``;
+* a finished response also carries ``normalized`` — a derived
+  entities/facts/provenance block (see ``spyglass_pro.facts``) that gives
+  every consumer one contract instead of three payload shapes;
+* async jobs publish progress lines *as they happen* into their job
+  record, so ``/api/stream`` can render a live run console;
 * unexpected failures come back as ``{"error": ...}`` so the dashboard
   always renders JSON.
 
@@ -30,6 +35,8 @@ import re
 import sys
 import sysconfig
 import threading
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 
@@ -57,6 +64,12 @@ if _SCRIPTS_DIR and os.path.isdir(_SCRIPTS_DIR):
 # collection. Extra requests queue here instead of piling up work.
 JOB_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="spyglass-job")
 
+# Dedicated single worker for browser-driven social collection. The social
+# harness serializes on its own lock already; giving it its own queue
+# keeps a long Instagram collection from starving the 3 generic workers,
+# and keeps a flood of generic scans from starving social.
+SOCIAL_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="spyglass-social")
+
 # Queue cap: heavy jobs (a full username sweep runs many minutes at
 # worst) must not pile up unboundedly — a client that fires many
 # requests gets rejected once the pending queue is full instead of
@@ -69,6 +82,12 @@ JOB_TIMEOUT = float(os.environ.get("SPYGLASS_PRO_JOB_TIMEOUT", "900"))
 
 _JOB_LOCK = threading.Lock()
 _PENDING = 0
+
+# Thread-local progress sink. ``submit_job`` registers a per-job push
+# function here for the duration of one job's execution, so a
+# ``Progress`` created deep inside an engine still lands its lines in the
+# job record while the scan runs — not only in the final payload.
+_PROGRESS_HOOK = threading.local()
 
 
 def _safe_error(exc):
@@ -122,16 +141,213 @@ def run_job(fn, *args, **kwargs):
         return {"error": f"{name} failed: {_safe_error(exc)}"}
 
 
+# ─── async job registry (non-blocking API) ───────────────────────
+#
+# run_job() above blocks the HTTP worker until the scan finishes. Under
+# the Flask dev server — and under any threaded WSGI server — a handful
+# of concurrent long scans (username sweeps run minutes) exhausts HTTP
+# workers even though the pool already bounds scan concurrency.
+#
+# submit_job() instead queues the same runners and returns a job_id
+# immediately; the caller polls get_job(). The HTTP thread is freed,
+# the scan still honors MAX_QUEUE / JOB_TIMEOUT, and the sync API is
+# untouched. Code-only: in-memory registry, no Redis, no Docker.
+#
+# Known limitation (documented, not hidden): a timed-out scan keeps its
+# pool worker until the underlying function returns — Python threads
+# cannot be killed. The HTTP caller is released; pool capacity is not.
+
+_ASYNC_LOCK = threading.Lock()
+_ASYNC_JOBS: dict = {}
+_ASYNC_MAX_JOBS = max(1, int(os.environ.get("SPYGLASS_PRO_MAX_JOBS", "200")))
+_ASYNC_TTL = float(os.environ.get("SPYGLASS_PRO_JOB_TTL", "3600"))
+
+# One condition over the job registry: progress pushers and finished-job
+# callbacks notify it, stream readers wait on it (bounded, so a missed
+# notification costs one timeout, never a hung socket).
+_PROGRESS_COND = threading.Condition(_ASYNC_LOCK)
+
+
+def _prune_jobs(now=None):
+    now = now if now is not None else time.time()
+    with _ASYNC_LOCK:
+        ids = list(_ASYNC_JOBS.keys())
+        for job_id in ids:
+            job = _ASYNC_JOBS.get(job_id)
+            if job and (now - job.get("created_at", now)) > _ASYNC_TTL:
+                _ASYNC_JOBS.pop(job_id, None)
+        # Hard cap: drop oldest finished first, then oldest overall.
+        while len(_ASYNC_JOBS) > _ASYNC_MAX_JOBS:
+            oldest = min(_ASYNC_JOBS.items(),
+                         key=lambda kv: (kv[1].get("status") == "running",
+                                         kv[1].get("created_at", 0)))
+            _ASYNC_JOBS.pop(oldest[0], None)
+
+
+def submit_job(fn, *args, pool=None, **kwargs):
+    """Queue ``fn`` and return ``{"job_id": ..., "status": "running"}``.
+
+    Honors the same MAX_QUEUE back-pressure as run_job(); a full queue
+    returns ``{"error": ...}`` with REJECTED_KEY so Flask maps it to 429.
+    """
+    global _PENDING
+    name = getattr(fn, "__name__", "job")
+    target_pool = pool or JOB_POOL
+    with _JOB_LOCK:
+        if _PENDING >= MAX_QUEUE:
+            return _rejected(f"{name} rejected: job queue full ({MAX_QUEUE} pending)")
+        _PENDING += 1
+    _prune_jobs()
+    job_id = uuid.uuid4().hex
+    job = {"job_id": job_id, "name": name, "status": "running",
+           "created_at": time.time(), "result": None, "error": None,
+           "progress": []}
+    with _ASYNC_LOCK:
+        _ASYNC_JOBS[job_id] = job
+
+    def _push(line):
+        """Append one live progress line to this job's record."""
+        with _PROGRESS_COND:
+            stored = _ASYNC_JOBS.get(job_id)
+            if stored is None:  # pruned or already finished — nothing to do
+                return
+            stored.setdefault("progress", []).append(line)
+            _PROGRESS_COND.notify_all()
+
+    def _publish(*args, **kwargs):
+        # Thread-local: only this job's worker sees the sink, so parallel
+        # jobs never push into each other's records.
+        _PROGRESS_HOOK.push = _push
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _PROGRESS_HOOK.push = None
+
+    try:
+        fut = target_pool.submit(_publish, *args, **kwargs)
+    except Exception as exc:
+        with _JOB_LOCK:
+            _PENDING -= 1
+        with _ASYNC_LOCK:
+            _ASYNC_JOBS.pop(job_id, None)
+        return {"error": f"{name} rejected: {_safe_error(exc)}"}
+
+    def _finish_async(_fut):
+        global _PENDING
+        try:
+            try:
+                result = _fut.result(timeout=JOB_TIMEOUT)
+            except FutureTimeoutError:
+                result = {"error": f"{name} timed out after {int(JOB_TIMEOUT)}s "
+                                   "(the scan may still be running)"}
+            except Exception as exc:
+                result = {"error": f"{name} failed: {_safe_error(exc)}"}
+            with _PROGRESS_COND:
+                stored = _ASYNC_JOBS.get(job_id)
+                if stored is not None:
+                    stored["status"] = "done"
+                    stored["result"] = result
+                    stored["finished_at"] = time.time()
+                # Notify even when the job was pruned: a stream waiting on
+                # this id must wake up and report it gone, not wait out its
+                # timeout every cycle.
+                _PROGRESS_COND.notify_all()
+        finally:
+            with _JOB_LOCK:
+                _PENDING -= 1
+
+    fut.add_done_callback(_finish_async)
+    return {"job_id": job_id, "status": "running", "name": name}
+
+
+def get_job(job_id):
+    """Return a snapshot of the stored job dict, or ``{"error": ...}``.
+
+    ``progress`` is copied: a stream reader must be able to iterate it
+    while the job's worker is still appending.
+    """
+    job_id = (job_id or "").strip()
+    if not job_id:
+        return {"error": "job_id required"}
+    with _ASYNC_LOCK:
+        job = _ASYNC_JOBS.get(job_id)
+        if job is None:
+            return {"error": f"unknown job: {job_id}"}
+        out = dict(job)
+        out["progress"] = list(job.get("progress") or [])
+        return out
+
+
+def wait_progress(job_id, timeout=1.0):
+    """Block until this job pushes a progress line, finishes, or the
+    timeout elapses. Returns False when the job no longer exists.
+
+    Stream readers loop on this instead of busy-polling: a line arrives
+    promptly, and a slow leg costs at most one timeout per check.
+    """
+    with _PROGRESS_COND:
+        if job_id not in _ASYNC_JOBS:
+            return False
+        _PROGRESS_COND.wait(timeout)
+        return True
+
+
+def list_jobs(limit=50):
+    """Newest-first snapshot of the in-memory job registry."""
+    try:
+        limit = max(1, min(int(limit), 200))
+    except (TypeError, ValueError):
+        limit = 50
+    with _ASYNC_LOCK:
+        jobs = list(_ASYNC_JOBS.values())
+    jobs.sort(key=lambda j: j.get("created_at", 0), reverse=True)
+    out = []
+    for job in jobs[:limit]:
+        entry = dict(job)
+        # Do not ship full results in the list view — poll one job for that.
+        if entry.get("result") is not None:
+            entry["has_result"] = True
+            entry.pop("result", None)
+        out.append(entry)
+    return out
+
+
+def forget_job(job_id):
+    """Drop a finished job from the registry. Running jobs are kept."""
+    job_id = (job_id or "").strip()
+    with _ASYNC_LOCK:
+        job = _ASYNC_JOBS.get(job_id)
+        if job is None:
+            return {"error": f"unknown job: {job_id}"}
+        if job.get("status") == "running":
+            return {"error": "job is still running and cannot be forgotten"}
+        _ASYNC_JOBS.pop(job_id, None)
+        return {"job_id": job_id, "forgotten": True}
+
+
 class Progress:
-    """Collects progress lines from a tool's terminal UI."""
+    """Collects progress lines from a tool's terminal UI.
+
+    When the running job registered a sink (see ``submit_job``), each
+    line is also pushed into the job record so ``/api/stream`` can show
+    it live. Push failures must never fail the scan: the line is already
+    collected locally either way.
+    """
 
     def __init__(self):
         self.lines = []
 
     def add(self, msg):
         line = re.sub(r"\s+", " ", str(msg)).strip()
-        if line:
-            self.lines.append(line)
+        if not line:
+            return
+        self.lines.append(line)
+        push = getattr(_PROGRESS_HOOK, "push", None)
+        if push is not None:
+            try:
+                push(line)
+            except Exception:
+                pass
 
 
 # ─── shared helpers ────────────────────────────────────────────
@@ -386,7 +602,30 @@ def _finish(result, qtype, target, flags, progress):
 
     response["progress"] = progress.lines
     response["summary"] = _spyglass_summary(qtype, target, result)
+    _attach_facts(response, qtype, target)
     return response
+
+
+def _attach_facts(response, qtype, target):
+    """Derive the normalized facts block onto a finished response.
+
+    Called last so provenance sees the final summary/progress/artifacts.
+    An errored response carries no normalized block (``normalize``
+    returns None) — absence, not null filler, is "nothing was known". A
+    failure *in the derived layer* keeps the raw payload intact and says
+    so in ``facts_error``, the same contract exports use for
+    ``artifact_error``.
+    """
+    if not isinstance(response, dict):
+        return
+    try:
+        from spyglass_pro import facts as facts_mod
+        block = facts_mod.normalize(response, qtype, target)
+    except Exception as exc:
+        response["facts_error"] = _safe_error(exc)
+        return
+    if block is not None:
+        response["normalized"] = block
 
 
 def _count_platforms(result):
@@ -506,6 +745,7 @@ def run_lens(target, flags):
         response["stored_run_id"] = stored_run_id
     response["progress"] = progress.lines
     response["summary"] = _lens_summary(report, target)
+    _attach_facts(response, "lens", target)
     return response
 
 
@@ -607,6 +847,7 @@ def run_investigate(payload):
         except Exception as exc:
             result["artifact_error"] = _safe_error(exc)
 
+    _attach_facts(result, "investigation", ", ".join(inputs.values()))
     return result
 
 
@@ -693,6 +934,7 @@ def run_social(platform, handle, payload, progress=None):
                     result, handle, f"social_{platform}"), "json")
         except Exception as exc:
             response["artifact_error"] = _safe_error(exc)
+    _attach_facts(response, "social", handle)
     return response
 
 
@@ -755,6 +997,58 @@ def _lens_cases(limit):
         return []
     finally:
         conn.close()
+
+
+def delete_case(run_id, qtype=""):
+    """Delete one stored run (plus its entity index rows) by id.
+
+    ``qtype`` picks the store: ``lens_*`` lives in the Lens scans table,
+    everything else in the spyglass runs/entities tables. Done in the
+    merge layer so the vendored engines stay untouched — same pattern as
+    the list helpers above. Without this the case table only grows.
+    """
+    try:
+        run_id = int(run_id)
+    except (TypeError, ValueError):
+        return {"error": "run id required"}
+    if run_id <= 0:
+        return {"error": "run id required"}
+    qtype = (qtype or "").strip()
+    if qtype.startswith("lens_"):
+        try:
+            from lens_extender import store as le_store
+            conn = le_store._get_conn()
+        except ImportError:
+            return {"error": "Lens-Extender store unavailable"}
+        try:
+            cur = conn.execute("DELETE FROM scans WHERE id = ?", (run_id,))
+            conn.commit()
+            if not cur.rowcount:
+                return {"error": f"no stored lens run #{run_id}"}
+            return {"deleted": run_id, "qtype": qtype}
+        except Exception as exc:
+            return {"error": _safe_error(exc)}
+        finally:
+            conn.close()
+    try:
+        from spyglass_osint import store as sg_store
+        db = sg_store._connect()
+    except ImportError:
+        return {"error": "Spyglass-OSINT store unavailable"}
+    try:
+        sg_store._init(db)
+        # Explicit entity delete: SQLite only cascades with
+        # PRAGMA foreign_keys=ON, which the store does not set.
+        db.execute("DELETE FROM entities WHERE run_id = ?", (run_id,))
+        cur = db.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+        db.commit()
+        if not cur.rowcount:
+            return {"error": f"no stored run #{run_id}"}
+        return {"deleted": run_id, "qtype": qtype}
+    except Exception as exc:
+        return {"error": _safe_error(exc)}
+    finally:
+        db.close()
 
 
 # ─── Case queries (entity index) ───────────────────────────

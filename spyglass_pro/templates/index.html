@@ -6,7 +6,8 @@
 <title>Spyglass-Pro — Unified OSINT Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/css/style.css">
 </head>
@@ -21,11 +22,6 @@
     <div class="proxy-status" id="proxyStatus">
       <span class="dot idle"></span>
       <span class="proxy-label">No Proxy</span>
-    </div>
-    <div class="module-tags" id="moduleTags">
-      <span class="mod-tag" title="Spyglass-OSINT" data-mod="spyglass">OSINT</span>
-      <span class="mod-tag" title="Social harness" data-mod="social">SOCIAL</span>
-      <span class="mod-tag" title="Lens-Extender" data-mod="lens_extender">LENS</span>
     </div>
   </div>
 </header>
@@ -43,7 +39,9 @@
       <li class="nav-item" data-panel="email"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg></span>Email</li>
       <li class="nav-item" data-panel="username"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>Username</li>
       <li class="nav-item" data-panel="phone"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>Phone Number</li>
-      <li class="nav-item" data-panel="instagram"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg></span>Instagram</li>
+      <li class="nav-item" data-panel="social" data-platform="instagram"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1"/></svg></span>Instagram</li>
+      <li class="nav-item" data-panel="social" data-platform="mastodon"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></span>Mastodon</li>
+      <li class="nav-item" data-panel="social" data-platform="bluesky"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="20"/><path d="M12 7C8 4 4 5 4 9c0 3 3 5 6 4-2 1-3 3-2 5 1 1 2 0 4-2"/><path d="M12 7c4-3 8-2 8 2 0 3-3 5-6 4 2 1 3 3 2 5-1 1-2 0-4-2"/></svg></span>Bluesky</li>
       <li class="nav-item" data-panel="darkweb"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>Dark Web</li>
 
       <li class="nav-group">Infrastructure</li>
@@ -56,6 +54,7 @@
       <li class="nav-group">Utilities</li>
       <li class="nav-item" data-panel="metadata"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>Metadata</li>
       <li class="nav-item" data-panel="opsec"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>OPSEC Check</li>
+      <li class="nav-item" data-panel="settings"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Settings</li>
 
       <li class="nav-group">Cases</li>
       <li class="nav-item" data-panel="cases"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>Stored Cases</li>
@@ -70,13 +69,15 @@
       <h2>Spyglass-Pro</h2>
       <p class="panel-desc">Unified OSINT dashboard. Pick a data type and run recon — results correlate across every source.</p>
       <div id="toolNotice" class="tool-notice" style="display:none;"></div>
-      <div class="dash-quick">
-        <h3>Quick Proxy Setup</h3>
-        <div class="proxy-form">
-          <input type="text" id="proxyInput" placeholder="socks5://127.0.0.1:9050 or http://user:pass@host:port" />
-          <button id="proxyApply" class="btn btn-sm btn-primary">Apply</button>
-          <button id="proxyClear" class="btn btn-sm btn-outline">Clear</button>
-        </div>
+      <div class="stat-grid" id="statGrid">
+        <div class="stat-card"><span class="stat-num" id="statTools">—</span><span class="stat-label">CLI tools</span></div>
+        <div class="stat-card"><span class="stat-num" id="statKeys">0/9</span><span class="stat-label">API keys set</span></div>
+        <div class="stat-card"><span class="stat-num" id="statCases">—</span><span class="stat-label">Stored cases</span></div>
+        <div class="stat-card"><span class="stat-num" id="statQueue">0</span><span class="stat-label">Jobs pending</span></div>
+      </div>
+      <div class="tool-panel">
+        <h3>Data sources</h3>
+        <div id="toolGrid" class="tool-grid"></div>
       </div>
     </section>
 
@@ -150,42 +151,38 @@
     </section>
 
     <!-- Social Panel (registry-driven) -->
-    <section class="panel" id="panel-instagram">
-      <h2>Instagram Recon</h2>
-      <p class="panel-desc">Stealth Instagram profile recon through a humanized browser. Profile, posts, contacts, social graph. Basic runs work logged-out; enable the optional burner login for advanced social-graph recon.</p>
+    <section class="panel" id="panel-social">
+      <h2>Social Recon</h2>
+      <p class="panel-desc">Profile recon across every registered platform. Instagram runs through a stealth browser; Mastodon and Bluesky are keyless and instant.</p>
       <form class="module-form" id="form-social" data-api="social" data-target="socialHandle" data-results="socialResults">
-        <div class="form-row" id="socialPlatformRow" hidden>
-          <label for="socialPlatform">Platform</label>
-          <select id="socialPlatform">
-            <option value="">Loading platforms…</option>
-          </select>
-        </div>
+        <input type="hidden" id="socialPlatform" value="instagram" />
         <div class="form-row">
+          <p class="social-active" id="socialPlatformName">Instagram</p>
           <p class="panel-hint" id="socialCaps"></p>
         </div>
         <div class="form-row">
-          <label for="socialHandle">Username</label>
-          <input type="text" id="socialHandle" placeholder="instagram" />
+          <label for="socialHandle">Handle</label>
+          <input type="text" id="socialHandle" placeholder="username (mastodon: user or user@instance)" />
         </div>
         <div class="form-row">
           <label>Options</label>
           <div class="checkbox-row">
-            <label><input type="checkbox" data-flag="headless" checked /> Headless</label>
-            <label><input type="checkbox" data-flag="deep" /> Deep (stories, HD propic)</label>
-            <label><input type="checkbox" data-flag="media" checked /> Download Media</label>
+            <label data-browser-only><input type="checkbox" data-flag="headless" checked /> Headless</label>
+            <label data-browser-only><input type="checkbox" data-flag="deep" /> Deep (stories, HD propic)</label>
+            <label data-browser-only><input type="checkbox" data-flag="media" checked /> Download Media</label>
             <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
             <label><input type="checkbox" data-flag="report" /> Markdown Report</label>
           </div>
         </div>
-        <div class="form-row burner-row">
-          <label>Burner Account (optional)</label>
+        <div class="form-row burner-row" id="burnerRow">
+          <label>Burner Account (Instagram only)</label>
           <div class="checkbox-row">
             <label><input type="checkbox" id="burnerEnabled" /> Use burner login — unlocks lists + posts where the platform allows it</label>
           </div>
           <input type="text" id="burnerUser" placeholder="burner username" autocomplete="off" />
           <input type="password" id="burnerPass" placeholder="burner password" autocomplete="new-password" />
         </div>
-        <button type="submit" class="btn btn-primary run-btn">Run Instagram Recon</button>
+        <button type="submit" class="btn btn-primary run-btn">Run Social Recon</button>
       </form>
       <div id="socialResults" class="results-area"></div>
     </section>
@@ -339,6 +336,24 @@
         <button type="submit" class="btn btn-primary run-btn">Run OPSEC Health Check</button>
       </form>
       <div id="opsecResults" class="results-area"></div>
+    </section>
+
+    <!-- Settings Panel -->
+    <section class="panel" id="panel-settings">
+      <h2>Settings</h2>
+      <div class="module-form settings-form">
+        <div class="settings-status" id="settingsStatus"><span class="dot idle"></span><span>Loading vault…</span></div>
+        <div class="settings-grid" id="settingsGrid"></div>
+        <div class="form-row">
+          <label for="settingsProxy">Outbound proxy</label>
+          <input type="text" id="settingsProxy" placeholder="socks5://127.0.0.1:9050" />
+        </div>
+        <div class="settings-actions">
+          <button type="button" class="btn btn-primary" id="settingsSave">Save all keys</button>
+          <button type="button" class="btn btn-outline" id="settingsReload">Reload</button>
+        </div>
+        <p class="panel-hint">Bare install works keyless — breach data, DNS, RDAP, crt.sh, InternetDB, GreyNoise community. Keys only add depth.</p>
+      </div>
     </section>
 
     <!-- Cases Panel -->
