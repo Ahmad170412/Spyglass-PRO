@@ -106,7 +106,7 @@ launch agent instead of a login shell.
 | **Investigation** | Runs every engine in parallel and correlates shared emails, IPs, domains and usernames |
 | **OPSEC** | Local self-check: your real IP, proxy status, DNS-leak exposure, timezone/geo fingerprint risk |
 | **Metadata** | ExifTool + PDF/OOXML/image fallbacks, MD5/SHA-256, GPS, with file-type reconciliation |
-| **Instagram** | Stealth-browser profile collection that reports walls honestly instead of faking completeness |
+| **Social** | Instagram (stealth browser) + Mastodon and Bluesky (keyless, instant), one registry-driven panel |
 | **Cases** | Encrypted-at-rest run history with entity diffing, timelines and dossier export |
 
 ---
