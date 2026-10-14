@@ -142,18 +142,25 @@ def collect(platform_key: str, handle: str, options: dict | None = None,
     started = time.time()
     ctx = None
     try:
-        with BROWSER_LOCK, bridge_progress(progress):
-            ctx = open_session(cfg, safe_dir_name(f"{platform.key}-{handle}"))
-            page = ctx.new_page()
+        if not platform.browser:
+            # Keyless JSON adapters need no stealth session: no browser
+            # launch, no lock, no 200 MB dependency for a public GET.
+            progress.add(f"keyless {platform.label} lookup for @{handle}")
+            platform.collect(None, cfg, handle, result)
+            progress.add(f"{platform.label} lookup complete")
+        else:
+            with BROWSER_LOCK, bridge_progress(progress):
+                ctx = open_session(cfg, safe_dir_name(f"{platform.key}-{handle}"))
+                page = ctx.new_page()
 
-            wants_login = bool(cfg.get("login_enabled") and cfg.get("login_username"))
-            if wants_login and platform.login != "none":
-                result["logged_in"] = _login(page, cfg, platform, result)
-            elif wants_login:
-                schema.add_note(result, f"{platform.label} has no burner-login flow; "
-                                        "collected logged-out only")
+                wants_login = bool(cfg.get("login_enabled") and cfg.get("login_username"))
+                if wants_login and platform.login != "none":
+                    result["logged_in"] = _login(page, cfg, platform, result)
+                elif wants_login:
+                    schema.add_note(result, f"{platform.label} has no burner-login flow; "
+                                            "collected logged-out only")
 
-            platform.collect(page, cfg, handle, result)
+                platform.collect(page, cfg, handle, result)
     except SystemExit as exc:
         # open_session exits when cloakbrowser is missing.
         result["error"] = (f"stealth browser unavailable (exit {exc.code}). "

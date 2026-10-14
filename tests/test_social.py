@@ -92,7 +92,15 @@ class FrontendSchemaMirrorTest(unittest.TestCase):
 class RegistryTest(unittest.TestCase):
     def test_bundled_platforms_register(self):
         keys = [platform["key"] for platform in registry.describe()]
-        self.assertIn("instagram", keys)
+        for expected in ("instagram", "mastodon", "bluesky"):
+            self.assertIn(expected, keys)
+
+    def test_keyless_platforms_need_no_browser_or_login(self):
+        for key in ("mastodon", "bluesky"):
+            platform = registry.get(key)
+            self.assertEqual(platform.login, "none")
+            self.assertFalse(platform.browser)
+        self.assertTrue(registry.get("instagram").browser)
 
     def test_unknown_platform_is_none(self):
         self.assertIsNone(registry.get("myspace"))
@@ -234,6 +242,138 @@ class BurnerProfileTest(unittest.TestCase):
             reg._REGISTRY.clear()
             reg._REGISTRY.update(saved_registry)
             reg._LOADED = saved_loaded
+
+
+MASTODON_ACCOUNT = {
+    "id": "1",
+    "username": "example",
+    "acct": "example",
+    "display_name": "Example <b>Person</b>",
+    "note": "<p>hello &amp; welcome</p>",
+    "url": "https://mastodon.social/@example",
+    "avatar": "https://files.masto/a.png",
+    "followers_count": 120,
+    "following_count": 30,
+    "statuses_count": 7,
+    "locked": False,
+    "bot": False,
+    "created_at": "2020-01-02T00:00:00.000Z",
+    "fields": [
+        {"name": "Web", "value": "<a href=\"https://example.com\">example.com</a>",
+         "verified_at": "2021-05-05T00:00:00.000Z"},
+        {"name": "Unverified", "value": "nope", "verified_at": None},
+    ],
+}
+
+MASTODON_STATUSES = [
+    {"id": "9", "url": "https://mastodon.social/@example/9",
+     "content": "<p>first <a href=\"https://x\">post</a></p>",
+     "favourites_count": 4, "replies_count": 1,
+     "created_at": "2024-01-01T00:00:00.000Z",
+     "media_attachments": [{"type": "image"}]},
+]
+
+BLUESKY_PROFILE = {
+    "did": "did:plc:abc",
+    "handle": "example.bsky.social",
+    "displayName": "Example Person",
+    "description": "hello  world",
+    "avatar": "https://cdn.bsky/avatar",
+    "followersCount": 500,
+    "followsCount": 60,
+    "postsCount": 42,
+    "indexedAt": "2023-06-01T00:00:00.000Z",
+}
+
+BLUESKY_FEED = [
+    {"post": {"uri": "at://did:plc:abc/app.bsky.feed.post/rkey1",
+              "likeCount": 8, "replyCount": 2,
+              "indexedAt": "2024-02-01T00:00:00.000Z",
+              "record": {"text": "hi there", "createdAt": "2024-02-01T00:00:00.000Z"}}},
+]
+
+
+class MastodonNormalizeTest(unittest.TestCase):
+    def _result(self, account=None):
+        from spyglass_pro.social.platforms import mastodon
+
+        result = schema.new_result("mastodon", "example")
+        mastodon.normalize(account if account is not None else MASTODON_ACCOUNT, result)
+        return result
+
+    def test_maps_profile_fields_and_strips_html(self):
+        result = self._result()
+        self.assertTrue(result["found"])
+        self.assertEqual(result["display_name"], "Example Person")
+        self.assertEqual(result["bio"], "hello & welcome")
+        self.assertEqual(result["follower_count"], 120)
+        self.assertEqual(result["post_count"], 7)
+
+    def test_only_verified_links_survive(self):
+        self.assertEqual(self._result()["external_links"], ["example.com"])
+
+    def test_lists_are_walls_not_empty_lists(self):
+        result = self._result()
+        self.assertIn("followers", result["walls"])
+        self.assertIn("following", result["walls"])
+
+    def test_private_and_bot_are_reported(self):
+        from spyglass_pro.social.platforms import mastodon
+
+        locked = dict(MASTODON_ACCOUNT, locked=True, bot=True)
+        result = schema.new_result("mastodon", "example")
+        mastodon.normalize(locked, result)
+        self.assertTrue(result["private"])
+        self.assertIn("bot", " ".join(result["notes"]))
+
+    def test_missing_account_is_not_found(self):
+        self.assertFalse(self._result({})["found"])
+
+    def test_posts_map_counts(self):
+        from spyglass_pro.social.platforms import mastodon
+
+        result = self._result()
+        mastodon.normalize_posts(MASTODON_STATUSES, result)
+        (post,) = result["posts"]
+        self.assertEqual(post["caption"], "first post")
+        self.assertEqual(post["likes"], 4)
+        self.assertEqual(post["comments"], 1)
+
+
+class BlueskyNormalizeTest(unittest.TestCase):
+    def _result(self, profile=None):
+        from spyglass_pro.social.platforms import bluesky
+
+        result = schema.new_result("bluesky", "example.bsky.social")
+        bluesky.normalize(profile if profile is not None else BLUESKY_PROFILE, result)
+        return result
+
+    def test_maps_profile_fields(self):
+        result = self._result()
+        self.assertTrue(result["found"])
+        self.assertEqual(result["display_name"], "Example Person")
+        self.assertEqual(result["url"], "https://bsky.app/profile/example.bsky.social")
+        self.assertEqual(result["follower_count"], 500)
+        self.assertEqual(result["joined"], "2023-06-01T00:00:00.000Z")
+
+    def test_lists_are_walls_not_empty_lists(self):
+        result = self._result()
+        self.assertIn("followers", result["walls"])
+        self.assertIn("following", result["walls"])
+
+    def test_missing_profile_is_not_found(self):
+        self.assertFalse(self._result({})["found"])
+
+    def test_feed_maps_to_post_urls(self):
+        from spyglass_pro.social.platforms import bluesky
+
+        result = self._result()
+        bluesky.normalize_feed(BLUESKY_FEED, "example.bsky.social", result)
+        (post,) = result["posts"]
+        self.assertEqual(post["url"],
+                         "https://bsky.app/profile/example.bsky.social/post/rkey1")
+        self.assertEqual(post["caption"], "hi there")
+        self.assertEqual(post["likes"], 8)
 
 
 INSTAGRAM_REPORT = {

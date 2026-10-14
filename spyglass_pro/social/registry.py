@@ -34,17 +34,22 @@ class Platform:
              them assume a field is missing because collection failed.
     login    whether a burner login can unlock more than the logged-out
              path, and whether the harness should offer it
+    browser  whether collection needs the stealth browser. Keyless JSON
+             adapters (Mastodon, Bluesky) set this False: the harness
+             skips the browser entirely and hands them ``page=None``.
+             Requiring a 200 MB browser for a keyless GET would be silly.
     collect  async-free callable(page, cfg, handle, result) -> None that
              fills `result` in place using the normalized schema
     """
 
     def __init__(self, key, label, url, capabilities=(), login="none",
-                 collect=None, homepage=""):
+                 browser=True, collect=None, homepage=""):
         self.key = key
         self.label = label
         self.url_template = url
         self.capabilities = tuple(capabilities)
         self.login = login
+        self.browser = browser
         self.collect = collect
         self.homepage = homepage
 
@@ -61,6 +66,7 @@ class Platform:
             "label": self.label,
             "homepage": self.homepage,
             "login": self.login,
+            "browser": self.browser,
             "capabilities": list(self.capabilities),
         }
 
@@ -76,7 +82,7 @@ def load_all() -> dict:
     with _LOCK:
         if _LOADED:
             return _REGISTRY
-        for module in ("instagram",):
+        for module in ("instagram", "mastodon", "bluesky"):
             try:
                 importlib.import_module(f"{__package__}.platforms.{module}")
             except Exception:  # noqa: S112 - a broken adapter must not hide the rest
