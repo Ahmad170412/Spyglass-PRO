@@ -116,9 +116,11 @@ _FILE_TYPES = {
     ".apk": ("APK", "application/vnd.android.package-archive"),
 }
 
-# `.ts` is ambiguous (TypeScript source vs MPEG transport stream);
-# ExifTool labels transport streams, so that mapping wins.
-_FILE_TYPES[".ts"] = ("MPEG-TS", "video/mp2t")
+# `.ts` is TypeScript source far more often than an MPEG transport stream
+# in this tool's world, so the table says TypeScript. A genuine stream is
+# still safe: exiftool sniffs its magic and reports M2TS/MPEG-TS (never the
+# TXT fallback), and the reconciler below only flips an MPEG-TS label when
+# the bytes are demonstrably text without the 0x47 sync pattern.
 
 
 def _file_info(path):
@@ -345,7 +347,18 @@ def _reconcile_file_type(path, result):
     TXT/txt/text/plain — wrong for .py, .md, .json, .yaml, .log and every
     other code file. When the real extension maps to a known type, trust it
     over that fallback. Everything else keeps exiftool's content-based
-    detection, so a zip disguised as .txt still reports as ZIP."""
+    detection, so a zip disguised as .txt still reports as ZIP.
+
+    Two sharper edges of the same problem:
+
+    * ``.ts`` is TypeScript source or an MPEG transport stream and exiftool
+      cannot tell them apart (it labels both MPEG-TS). A null byte or
+      undecodable bytes means binary, so the stream label stands; anything
+      else is source code.
+    * An empty (or otherwise unreadable-to-exiftool) file yields no FileType
+      at all. With no content signal either way, the extension table is the
+      only honest answer — better "Python" than a blank type line.
+    """
     ext = os.path.splitext(path)[1].lower()
     known = _FILE_TYPES.get(ext)
     if not known:
@@ -355,3 +368,48 @@ def _reconcile_file_type(path, result):
         result["FileType"] = name
         result["FileTypeExtension"] = ext.lstrip(".")
         result["MIMEType"] = mime
+        return
+    if ext == ".ts" and result.get("FileType") == "MPEG-TS" \
+            and not _is_transport_stream(path) and _looks_like_text(path):
+        result["FileType"] = "TypeScript"
+        result["FileTypeExtension"] = "ts"
+        result["MIMEType"] = "text/x-typescript"
+        return
+    if not result.get("FileType"):
+        name, mime = known
+        result["FileType"] = name
+        result["FileTypeExtension"] = ext.lstrip(".")
+        result["MIMEType"] = mime
+
+
+def _looks_like_text(path, sample=8192):
+    """True when a file's first bytes decode as text with no null bytes."""
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(sample)
+    except OSError:
+        return False
+    if not chunk:
+        return True  # empty: no binary signal, extension decides
+    if b"\x00" in chunk:
+        return False
+    try:
+        chunk.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def _is_transport_stream(path):
+    """True when bytes carry the MPEG-TS sync pattern (0x47 every 188 bytes).
+
+    Real transport streams start each 188-byte packet with a sync byte, so
+    two aligned sync bytes all but settle it. A TypeScript file beginning
+    with 0x47 bytes in exactly those spots is not a thing.
+    """
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(512)
+    except OSError:
+        return False
+    return len(chunk) > 188 and chunk[0] == 0x47 and chunk[188] == 0x47
