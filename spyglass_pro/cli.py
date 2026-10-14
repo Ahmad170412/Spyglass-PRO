@@ -26,6 +26,12 @@ def main(argv=None):
     parser.add_argument("--debug", action="store_true",
                         help="Werkzeug debug mode — RCE console; "
                              "never enable on a reachable host")
+    parser.add_argument("--server", choices=["auto", "flask", "waitress"],
+                        help="WSGI server (default auto: waitress unless --debug; "
+                             "env: SPYGLASS_PRO_SERVER)")
+    parser.add_argument("--threads", type=int,
+                        help="waitress thread pool size (default 8; "
+                             "env: SPYGLASS_PRO_THREADS)")
     args = parser.parse_args(argv)
 
     if args.host:
@@ -36,6 +42,10 @@ def main(argv=None):
         os.environ["SPYGLASS_PRO_TOKEN"] = args.token
     if args.debug:
         os.environ["SPYGLASS_PRO_DEBUG"] = "1"
+    if args.server:
+        os.environ["SPYGLASS_PRO_SERVER"] = args.server
+    if args.threads:
+        os.environ["SPYGLASS_PRO_THREADS"] = str(args.threads)
 
     run()
 

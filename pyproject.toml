@@ -35,6 +35,7 @@ dependencies = [
   "cryptography>=42.0.0",
   "httpx>=0.27",
   "phonenumbers>=8.13",
+  "waitress>=2.0",
 ]
 
 [project.urls]
