@@ -262,5 +262,76 @@ console.log('== keyless tabs hide browser options ==');
   }
 })();
 
+console.log('== preflight names the upgrade ==');
+(function () {
+  sandbox.STATUS = { tools: { shodan: true }, degraded: {}, platforms: [], engines: {} };
+  sandbox.SETTINGS_CACHE = { keys: [
+    { key: 'shodan_api_key', configured: false },
+    { key: 'virustotal_api_key', configured: true },
+    { key: 'abuseipdb_api_key', configured: false },
+  ] };
+  const pf = sandbox.preflightHtml('ip');
+  check('names the missing keys', pf.includes('Shodan') && pf.includes('AbuseIPDB'), pf);
+  check('names what each key unlocks', pf.includes('open ports') && pf.includes('abuse confidence'), pf);
+  check('stays partial', pf.includes('PARTIAL POWER'), pf);
+  sandbox.SETTINGS_CACHE = { keys: [
+    { key: 'shodan_api_key', configured: true },
+    { key: 'virustotal_api_key', configured: true },
+    { key: 'abuseipdb_api_key', configured: true },
+  ] };
+  const fullKeys = sandbox.preflightHtml('ip');
+  check('no upgrade hint when nothing is missing', !fullKeys.includes('add Shodan'), fullKeys);
+  sandbox.SETTINGS_CACHE = null;
+  const unknown = sandbox.preflightHtml('ip');
+  check('unknown vault guesses nothing', !unknown.includes('add Shodan') && unknown.includes('Settings'), unknown);
+  sandbox.STATUS = null;
+  sandbox.SETTINGS_CACHE = null;
+})();
+
+console.log('== investigation: verdict first, links lit ==');
+(function () {
+  const inv = sandbox.renderInvestigate({
+    inputs: { email: 'a@b.com' },
+    entities: { emails: ['a@b.com'], domains: ['x.com', 'other.com'] },
+    correlations: [
+      { type: 'info', desc: 'Org appears in WHOIS and breach data', detail: 'Acme' },
+      { type: 'match', desc: 'Email domain matches website target', detail: 'x.com' },
+    ],
+    results: {},
+  });
+  check('matches sort above info', inv.indexOf('corr-match') < inv.indexOf('Org appears'), inv.slice(0, 300));
+  check('heading counts matches', inv.includes('Correlations (2, 1 match)'), inv.slice(0, 200));
+  check('matched entity lights up', inv.includes('chip-match'), inv.slice(0, 500));
+  check('unmatched entity stays plain', inv.includes('<span class="chip">other.com</span>'), inv.slice(0, 800));
+  check('graph draws kinds with real counts',
+    inv.includes('<svg') && inv.includes('domains · 2') && inv.includes('a@b.com'), inv.slice(0, 300));
+  const single = sandbox.renderInvestigate({ entities: { emails: ['a@b.com'] }, correlations: [] });
+  check('single kind needs no graph', !single.includes('<svg'), single.slice(0, 200));
+  const injected = sandbox.renderInvestigate({
+    entities: { emails: ['<img src=x onerror=alert(1)>'] }, correlations: [],
+  });
+  check('graph and chips escape input', !injected.includes('<img'), injected.slice(0, 300));
+})();
+
+console.log('== social preflight tells the truth ==');
+(function () {
+  const realGet = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) => (id === 'toolNotice' ? { innerHTML: '', style: {} } : null);
+  try {
+    sandbox.STATUS = { tools: {}, degraded: {}, platforms: [{}, {}, {}], engines: {} };
+    const pf = sandbox.preflightHtml('social');
+    check('names the registry, not 0/0 tools',
+      pf.includes('keyless Mastodon/Bluesky') && !pf.includes('0/0'), pf);
+    check('full power when loaded', pf.includes('FULL POWER'), pf);
+    sandbox.STATUS = { tools: {}, degraded: {}, platforms: [], engines: {} };
+    const dead = sandbox.preflightHtml('social');
+    check('dead engine reads as failure, not full power',
+      dead.includes('PARTIAL POWER') && dead.includes('failed to load'), dead);
+  } finally {
+    sandbox.document.getElementById = realGet;
+    sandbox.STATUS = null;
+  }
+})();
+
 console.log(`\n${'='.repeat(40)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

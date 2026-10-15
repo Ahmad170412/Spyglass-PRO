@@ -642,5 +642,37 @@ class AsyncSubmitTest(unittest.TestCase):
         self.assertNotIn(runner.REJECTED_KEY, resp.get_json())
 
 
+class AuditFixTest(unittest.TestCase):
+    """October audit fixes: validation must cover every dispatch path."""
+
+    def test_investigation_rejects_junk_before_dispatch(self):
+        from spyglass_osint import investigation
+        with mock.patch.object(investigation, "investigate") as inv:
+            result = runner.run_investigate({"website": "a" * 700})
+        inv.assert_not_called()
+        self.assertIn("too long", result["error"])
+
+    def test_investigation_rejects_shell_metachars(self):
+        from spyglass_osint import investigation
+        with mock.patch.object(investigation, "investigate") as inv:
+            result = runner.run_investigate({"username": "$(whoami)"})
+        inv.assert_not_called()
+        self.assertIn("error", result)
+
+    def test_investigation_accepts_legitimate_inputs(self):
+        from spyglass_osint import investigation
+        with mock.patch.object(investigation, "investigate",
+                               return_value={"entities": {}, "correlations": []}):
+            result = runner.run_investigate({"email": "a@x.com"})
+        self.assertNotIn("error", result)
+
+    def test_social_handle_length_capped(self):
+        from spyglass_pro.social import harness
+        with mock.patch.object(harness, "collect") as collect:
+            result = runner.run_social("mastodon", "x" * 300, {})
+        collect.assert_not_called()
+        self.assertIn("too long", result["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

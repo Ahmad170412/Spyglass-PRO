@@ -18,6 +18,7 @@ adapter's split: same fixtures-in, schema-out discipline.
 from __future__ import annotations
 
 import html as _html
+import ipaddress as _ipaddress
 import re as _re
 
 import httpx
@@ -56,6 +57,30 @@ def _host_of(url: str) -> str:
         return httpx.URL(url or "").host or ""
     except Exception:
         return ""
+
+
+def _valid_host(host: str) -> bool:
+    """Public DNS names only: dotted, no IP literals, sane label lengths.
+
+    Both candidate hosts here are untrusted — the instance half of the
+    handle comes straight from operator input, and the home host comes
+    from a server-returned account URL. Without this, either could aim
+    httpx at loopback, link-local, or intranet addresses (SSRF) on any
+    token-holder's behalf. Fediverse instances are public DNS names, so
+    a dotted non-IP hostname rejects ~nothing legitimate.
+    """
+    host = (host or "").strip().lower().rstrip(".")
+    if not host or "." not in host or len(host) > 253:
+        return False
+    if _re.fullmatch(r"[a-z0-9.-]+", host) is None:
+        # No ports, paths, userinfo, or whitespace — a bare hostname only.
+        return False
+    try:
+        _ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return all(part and len(part) <= 63 for part in host.split("."))
 
 
 def normalize(account: dict, result: dict) -> None:
@@ -125,6 +150,9 @@ def collect(page, cfg, handle: str, result: dict) -> None:
     handle = (handle or "").strip().lstrip("@")
     if "@" in handle:
         user, _, instance = handle.partition("@")
+        if instance and not _valid_host(instance):
+            result["error"] = f"invalid instance hostname: {instance[:80]}"
+            return
         query = f"{user}@{instance}" if instance else user
     else:
         user, instance, query = handle, "", handle
@@ -142,6 +170,12 @@ def collect(page, cfg, handle: str, result: dict) -> None:
                 add_note(result, f"resolver returned @{account.get('acct')} for @{query}")
             normalize(account, result)
             home = _host_of(account.get("url")) or RESOLVERS[0]
+            if not _valid_host(home):
+                # A hostile or broken instance answered lookup with an
+                # account URL pointing somewhere httpx must not go —
+                # keep the profile, skip its posts, say why.
+                add_note(result, "recent posts skipped (home instance hostname invalid)")
+                return
             result["source"] = f"mastodon API ({home})"
             statuses = _statuses(client, home, str(account["id"]))
             if statuses is not None:

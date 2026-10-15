@@ -464,7 +464,24 @@ var PREFLIGHT_KEYS = {
          ['greynoise_api_key', 'GreyNoise'], ['nvd_api_key', 'NVD']],
   ip: [['shodan_api_key', 'Shodan'], ['virustotal_api_key', 'VirusTotal'],
        ['abuseipdb_api_key', 'AbuseIPDB']],
-  darkweb: [['intelx_api_key', 'IntelX'], ['hibp_api_key', 'HIBP']]
+  darkweb: [['intelx_api_key', 'IntelX'], ['hibp_api_key', 'HIBP']],
+  email: [['hibp_api_key', 'HIBP']],
+  username: [['hibp_api_key', 'HIBP']],
+  phone: [['hibp_api_key', 'HIBP']]
+};
+/* What each missing key would actually unlock, in the operator's words
+ * from the vault — so PARTIAL POWER names the upgrade, not just the gap.
+ * Phrases mirror the Settings help text; adding a key here without the
+ * engine honoring it would be a lie, so keep the two in step. */
+var PREFLIGHT_WHY = {
+  shodan_api_key: 'open ports + org/ISP',
+  virustotal_api_key: 'IP reputation votes',
+  abuseipdb_api_key: 'abuse confidence score',
+  censys_api_key: 'host certs + services',
+  greynoise_api_key: 'noise classification',
+  nvd_api_key: 'CVE enrichment',
+  intelx_api_key: 'paste + breach archive',
+  hibp_api_key: 'authoritative breach list'
 };
 var SETTINGS_CACHE = null;
 
@@ -491,12 +508,23 @@ function preflightHtml(qtype) {
   }
   var bits = [];
   var full = true;
-  if (needed) {
+  if (needed && needed.length) {
     var have = needed.filter(function (t) { return tools[t]; });
     var missing = needed.filter(function (t) { return !tools[t]; });
     if (missing.length) full = false;
     bits.push(have.length + '/' + needed.length + ' tools detected' +
       (missing.length ? ' — missing ' + missing.join(', ') : ' — ' + needed.join(', ')));
+  } else if (qtype === 'social') {
+    /* No CLI legs and no keys: the panel is the registry. An empty
+       tools bit here once rendered "0/0 tools detected", which reads as
+       broken rather than keyless. */
+    var nplats = ((STATUS && STATUS.platforms) || []).length;
+    if (nplats) {
+      bits.push(nplats + ' platforms: stealth-browser Instagram + keyless Mastodon/Bluesky');
+    } else {
+      full = false;
+      bits.push('social engine failed to load');
+    }
   } else if (degraded[qtype]) {
     full = false;
     bits.push('missing ' + degraded[qtype].join(', '));
@@ -508,6 +536,18 @@ function preflightHtml(qtype) {
     bits.push('enrichment ' + haveK.length + '/' + keySpecs.length + ' keys' +
       (haveK.length ? ' (' + haveK.map(function (s) { return s[1]; }).join(', ') + ')' : '') +
       (unknown ? ' — open Settings to check' : ''));
+    /* Name the upgrade, not just the gap: each missing key with what it
+       unlocks on this run. Only when the vault state is known — a null
+       cache must not present guesses as missing keys. */
+    if (!unknown) {
+      var missingK = keySpecs.filter(function (spec) { return !settingsKeySet(spec[0]); });
+      if (missingK.length) {
+        bits.push('add ' + missingK.map(function (spec) {
+          var why = PREFLIGHT_WHY[spec[0]];
+          return spec[1] + (why ? ' (' + why + ')' : '');
+        }).join(' + ') + ' in Settings');
+      }
+    }
   }
   if (!bits.length) {
     if (!STATUS) return '<span class="power-badge partial">CHECKING TOOLS…</span>';
@@ -1321,26 +1361,49 @@ function renderLens(d) {
   return html;
 }
 
-/* ── Cross-tool investigation ── */
+/* ── Cross-tool investigation ──
+ *
+ * Matches sort first: they are the verdict, info rows are context. A
+ * matched value also lights up wherever it appears in the entity chips,
+ * so the link between "correlated" and "where" needs no scrolling. The
+ * graph is a summary visual only — center is the queried input, ring
+ * nodes are entity kinds with real counts, nothing weighted or inferred. */
 function renderInvestigate(d) {
   var html = '';
+  var matchValues = [];
+  (d.correlations || []).forEach(function (c) {
+    if (c && c.type === 'match' && c.detail) {
+      String(c.detail).split(',').forEach(function (v) {
+        v = v.trim();
+        if (v && matchValues.indexOf(v) === -1) matchValues.push(v);
+      });
+    }
+  });
   if (d.entities) {
-    var entHtml = '';
+    var entHtml = renderEntityGraph(d);
     [['emails', 'Emails'], ['domains', 'Domains'], ['ips', 'IP addresses'],
      ['phones', 'Phone numbers'], ['orgs', 'Organizations'], ['asns', 'ASNs']].forEach(function (pair) {
       var values = d.entities[pair[0]];
       if (Array.isArray(values) && values.length) {
-        entHtml += '<p class="res-line dim">' + pair[1] + ':</p>' + renderChips(values);
+        entHtml += '<p class="res-line dim">' + pair[1] + ':</p>' + matchChips(values, matchValues);
       }
     });
     html += renderSection('Entities', entHtml);
   }
   if (Array.isArray(d.correlations) && d.correlations.length) {
-    html += renderSection('Correlations (' + d.correlations.length + ')',
-      '<ul class="res-list">' + d.correlations.map(function (c) {
-        var badge = c.type === 'match' ? '<span class="artifact-kind">match</span> ' : '';
-        return '<li>' + badge + '<strong>' + escapeHtml(c.desc || c.type || '') + '</strong>' +
-               (c.detail ? '<br><span class="dim">' + escapeHtml(c.detail) + '</span>' : '') + '</li>';
+    var corrs = d.correlations.slice().sort(function (a, b) {
+      return ((b && b.type === 'match') - (a && a.type === 'match'));
+    });
+    var matches = corrs.filter(function (c) { return c && c.type === 'match'; }).length;
+    html += renderSection('Correlations (' + corrs.length + (matches ? ', ' + matches + ' match' +
+      (matches === 1 ? '' : 'es') : '') + ')',
+      '<ul class="res-list corr-list">' + corrs.map(function (c) {
+        var isMatch = c.type === 'match';
+        var out = '<li class="' + (isMatch ? 'corr-match' : '') + '">' +
+          (isMatch ? '<span class="artifact-kind">match</span> ' : '') +
+          '<strong>' + escapeHtml(c.desc || c.type || '') + '</strong>';
+        if (c.detail) out += '<br>' + corrDetailChips(String(c.detail), isMatch);
+        return out + '</li>';
       }).join('') + '</ul>');
   }
   if (d.results && typeof d.results === 'object') {
@@ -1360,6 +1423,81 @@ function renderInvestigate(d) {
   html += renderGeneric(d, ['inputs', 'entities', 'correlations', 'results',
                             'ip_recon', 'social', 'progress', 'summary']);
   return html;
+}
+
+/* Entity chips with cross-leg matches lit up: a value the correlator
+ * confirmed gets the accent border plus a title saying so. Exact string
+ * match only — near-matches stay plain rather than implying a link. */
+function matchChips(values, matchValues) {
+  if (!values || !values.length) return '';
+  var html = '<div class="chip-group">';
+  values.forEach(function (v) {
+    var hot = matchValues && matchValues.indexOf(String(v)) !== -1;
+    html += hot ? '<span class="chip chip-match" title="confirmed by a cross-leg match">' +
+                  escapeHtml(String(v)) + '</span>'
+                : '<span class="chip">' + escapeHtml(String(v)) + '</span>';
+  });
+  return html + '</div>';
+}
+
+/* A correlation detail is one value ("x.com") or a joined few — chips
+ * either way, capped so a five-address WHOIS dump stays readable. */
+function corrDetailChips(detail, isMatch) {
+  var parts = detail.split(',').map(function (v) { return v.trim(); })
+    .filter(function (v) { return v; });
+  if (!parts.length) return '<span class="dim">—</span>';
+  var shown = parts.slice(0, 8);
+  var html = '<div class="chip-group">' + shown.map(function (v) {
+    return '<span class="chip' + (isMatch ? ' chip-match' : '') + '">' +
+           escapeHtml(v) + '</span>';
+  }).join('') + '</div>';
+  if (parts.length > shown.length) {
+    html += '<p class="dim">+ ' + (parts.length - shown.length) + ' more</p>';
+  }
+  return html;
+}
+
+/* Summary graph: queried input in the center, entity kinds on a ring
+ * with their real counts. Kinds beyond six are listed, not drawn — a
+ * seven-spoke SVG stops being readable. No weights, no inference. */
+function renderEntityGraph(d) {
+  var kinds = Object.keys(d.entities || {}).filter(function (k) {
+    return Array.isArray(d.entities[k]) && d.entities[k].length;
+  });
+  if (kinds.length < 2) return '';
+  var shown = kinds.slice(0, 6);
+  var inputs = d.inputs && typeof d.inputs === 'object' ? d.inputs : null;
+  var center = inputs ? Object.keys(inputs).map(function (k) { return inputs[k]; })
+    .filter(function (v) { return v; }).join(', ') : '';
+  center = String(center || 'target').slice(0, 28);
+  var W = 420, H = 60 + shown.length * 34, cx = W / 2, cy = H / 2;
+  var svg = '<div class="entity-graph"><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" ' +
+    'aria-label="Entity summary graph">';
+  var n = shown.length;
+  var pts = shown.map(function (kind, i) {
+    var a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    return { kind: kind, x: cx + Math.cos(a) * 150, y: cy + Math.sin(a) * (H / 2 - 30) };
+  });
+  pts.forEach(function (p) {
+    svg += '<line x1="' + cx + '" y1="' + cy + '" x2="' + p.x.toFixed(1) +
+           '" y2="' + p.y.toFixed(1) + '" class="graph-edge"/>';
+  });
+  pts.forEach(function (p) {
+    var count = d.entities[p.kind].length;
+    svg += '<g><rect x="' + (p.x - 62).toFixed(1) + '" y="' + (p.y - 15).toFixed(1) +
+           '" width="124" height="30" rx="8" class="graph-node"/>' +
+           '<text x="' + p.x.toFixed(1) + '" y="' + (p.y + 4).toFixed(1) +
+           '" text-anchor="middle" class="graph-label">' +
+           escapeHtml(p.kind) + ' · ' + count + '</text></g>';
+  });
+  svg += '<g><rect x="' + (cx - 70) + '" y="' + (cy - 16) + '" width="140" height="32" rx="10" ' +
+         'class="graph-center"/>' +
+         '<text x="' + cx + '" y="' + (cy + 5) + '" text-anchor="middle" class="graph-center-label">' +
+         escapeHtml(center) + '</text></g></svg>';
+  if (kinds.length > shown.length) {
+    svg += '<p class="dim">+ ' + (kinds.length - shown.length) + ' more kinds below</p>';
+  }
+  return svg + '</div>';
 }
 
 /* ── Generic fallback ── */

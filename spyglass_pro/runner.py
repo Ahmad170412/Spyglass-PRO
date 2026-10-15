@@ -806,6 +806,13 @@ def run_investigate(payload):
     inputs = {key: value for key, value in inputs.items() if value}
     if not inputs:
         return {"error": "provide at least one email, username, phone or website"}
+    # The single-module path rejects junk before dispatch — the
+    # investigation must too, or a 700-character "website" sails past the
+    # gate straight into every engine.
+    for key, value in inputs.items():
+        invalid = _validate_target(key, value)
+        if invalid:
+            return {"error": invalid}
 
     progress.add("running parallel recon (email / username / phone / website)")
     try:
@@ -902,6 +909,11 @@ def run_social(platform, handle, payload, progress=None):
         return {"error": f"unknown platform: {platform}"}
     if not handle:
         return {"error": "handle required"}
+    # Handles ride into API URLs and directory names — same ceiling as
+    # every other target so a megabyte handle cannot do either.
+    if len(handle) > MAX_TARGET_LEN:
+        return {"error": f"handle is too long ({len(handle)} characters, "
+                         f"maximum {MAX_TARGET_LEN})"}
 
     options = {
         "headless": bool(payload.get("headless")),

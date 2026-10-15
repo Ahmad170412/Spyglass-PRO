@@ -466,6 +466,64 @@ class InstagramNormalizeTest(unittest.TestCase):
         self.assertFalse(result["found"])
 
 
+class MastodonSecurityTest(unittest.TestCase):
+    """Instance hostnames are untrusted input on both sides.
+
+    The handle's instance half comes from the operator (or any token
+    holder), and the home host for the statuses fetch comes from a
+    server-returned account URL — either could aim httpx at loopback,
+    link-local, or intranet addresses (SSRF) without a hostname guard.
+    """
+
+    def test_ip_literals_are_rejected(self):
+        from spyglass_pro.social.platforms import mastodon
+
+        for host in ("127.0.0.1", "169.254.169.254", "10.0.0.5",
+                     "::1", "0.0.0.0"):
+            self.assertFalse(mastodon._valid_host(host), host)
+
+    def test_bare_labels_and_junk_are_rejected(self):
+        from spyglass_pro.social.platforms import mastodon
+
+        for host in ("", "localhost", "intranet", "no-dot-here",
+                     "a" * 64 + ".example.com", "example.com:80/x"):
+            self.assertFalse(mastodon._valid_host(host), host)
+
+    def test_real_instances_are_accepted(self):
+        from spyglass_pro.social.platforms import mastodon
+
+        for host in ("mastodon.social", "fosstodon.org",
+                     "Mastodon.Social.", "chaos.social"):
+            self.assertTrue(mastodon._valid_host(host), host)
+
+    def test_evil_instance_errors_without_network(self):
+        """No HTTP leaves the machine: validation runs before lookup."""
+        from unittest import mock
+
+        from spyglass_pro.social.platforms import mastodon
+
+        result = schema.new_result("mastodon", "user@127.0.0.1")
+        with mock.patch.object(mastodon, "_lookup") as lookup:
+            mastodon.collect(None, {}, "user@127.0.0.1", result)
+        lookup.assert_not_called()
+        self.assertIn("invalid instance hostname", result.get("error", ""))
+
+    def test_evil_home_host_keeps_profile_but_skips_posts(self):
+        """A hostile lookup answer cannot redirect the statuses fetch."""
+        from unittest import mock
+
+        from spyglass_pro.social.platforms import mastodon
+
+        account = dict(MASTODON_ACCOUNT, url="http://169.254.169.254/@example")
+        result = schema.new_result("mastodon", "example")
+        with mock.patch.object(mastodon, "_lookup", return_value=account), \
+             mock.patch.object(mastodon, "_statuses") as statuses:
+            mastodon.collect(None, {}, "example", result)
+        statuses.assert_not_called()
+        self.assertTrue(result["found"])
+        self.assertIn("skipped", " ".join(result["notes"]))
+
+
 class ReportTest(unittest.TestCase):
     def _result(self):
         result = schema.new_result("instagram", "example")
