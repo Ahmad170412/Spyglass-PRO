@@ -819,9 +819,16 @@ var SOCIAL_FIELDS = [
   { key: 'external_links', label: 'External Links', type: 'list' }
 ];
 
+function pluralize(n, one) {
+  return n + ' ' + (n === 1 ? one : one + 's');
+}
+
 function socialCell(field, value) {
   if (field.type === 'count' && typeof value === 'number') {
     return value.toLocaleString();
+  }
+  if (field.type === 'date' && value) {
+    return escapeHtml(String(value).slice(0, 10));
   }
   if (field.type === 'bool') {
     return value ? 'yes' : 'no';
@@ -851,7 +858,17 @@ function renderSocial(d) {
     html += '<p class="res-line">Error: <span class="status-err">' +
             escapeHtml(d.error) + '</span></p>';
   }
-  html += renderStatusLine('Session', d.logged_in ? 'burner logged in' : 'logged out', !!d.logged_in);
+  /* Logged-out in red reads as failure — but for keyless platforms no
+     session can or should exist, so say so plainly instead. */
+  var keyless = (typeof SOCIAL_META !== 'undefined') && SOCIAL_META &&
+    SOCIAL_META[d.platform] && !SOCIAL_META[d.platform].browser;
+  if (d.logged_in) {
+    html += renderStatusLine('Session', 'burner logged in', true);
+  } else if (keyless) {
+    html += '<p class="res-line dim">Session: none needed (keyless)</p>';
+  } else {
+    html += renderStatusLine('Session', 'logged out', false);
+  }
   html += renderStatusLine('Source', d.source || 'n/a', !!d.source);
 
   if (d.avatar_url && safeHref(d.avatar_url)) {
@@ -884,8 +901,9 @@ function renderSocial(d) {
       var href = safeHref(post.url || '');
       var caption = escapeHtml(post.caption || '(no caption)');
       var meta = [];
-      if (post.likes !== undefined && post.likes !== null) meta.push(post.likes + ' likes');
-      if (post.comments !== undefined && post.comments !== null) meta.push(post.comments + ' comments');
+      if (post.likes !== undefined && post.likes !== null) meta.push(pluralize(post.likes, 'like'));
+      if (post.comments !== undefined && post.comments !== null) meta.push(pluralize(post.comments, 'comment'));
+      if (post.timestamp) meta.push(escapeHtml(String(post.timestamp).slice(0, 10)));
       html += '<li>' + (href ? '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener">' +
                           caption + '</a>' : caption);
       if (meta.length) html += ' <span class="dim">(' + escapeHtml(meta.join(' · ')) + ')</span>';
@@ -1759,6 +1777,12 @@ function saveSettings() {
   }).catch(function () {});
 }
 
+/* Two stores, two timestamp dialects (spyglass seconds, lens
+   microseconds+tz) — trim to whole seconds so runs read uniformly. */
+function fmtRunAt(stamp) {
+  return String(stamp || '').slice(0, 19);
+}
+
 function loadCases() {
   var container = document.getElementById('casesList');
   if (!container) return;
@@ -1775,7 +1799,7 @@ function loadCases() {
                 '" data-qtype="' + escapeHtml(c.qtype) +
                 '" title="Load this target\'s timeline"><td>' + escapeHtml(c.target) +
                 '</td><td>' + escapeHtml(c.qtype) + '</td><td>' + c.id + '</td><td>' +
-                escapeHtml(c.run_at) + '</td>' +
+                escapeHtml(fmtRunAt(c.run_at)) + '</td>' +
                 '<td class="case-del-cell"><button type="button" class="case-del" data-del-id="' + c.id +
                 '" data-del-qtype="' + escapeHtml(c.qtype) +
                 '" title="Delete this stored run">✕</button></td></tr>';
@@ -1880,8 +1904,8 @@ function renderCaseDiff(d, qtype) {
                    '<a href="#" id="casesResetQtype">Search all query types</a>.</p>' : '');
   }
   html += '<p class="res-line">Comparing <span class="status-ok">' +
-          escapeHtml(d.old_run || '?') + '</span> → <span class="status-ok">' +
-          escapeHtml(d.new_run || '?') + '</span></p>';
+          escapeHtml(fmtRunAt(d.old_run || '?')) + '</span> → <span class="status-ok">' +
+          escapeHtml(fmtRunAt(d.new_run || '?')) + '</span></p>';
   html += entityList('Added', d.added, 'status-ok');
   html += entityList('Removed', d.removed, 'status-err');
   return html;
@@ -1895,7 +1919,7 @@ function renderCaseTimeline(d, qtype) {
   html += '<table class="res-table"><thead><tr><th>Run</th><th>Type</th><th>Entities</th></tr></thead><tbody>';
   runs.slice().reverse().forEach(function (run) {
     var ents = run.entities || [];
-    html += '<tr><td>' + escapeHtml(run.run_at) + '</td><td>' + escapeHtml(run.qtype) +
+    html += '<tr><td>' + escapeHtml(fmtRunAt(run.run_at)) + '</td><td>' + escapeHtml(run.qtype) +
             '</td><td>' + ents.length + '</td></tr>';
     /* Per-run entities inline: counts alone forced a second query to see
        what actually changed, which is what the diff view is for. Cap the

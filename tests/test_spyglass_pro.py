@@ -674,5 +674,70 @@ class AuditFixTest(unittest.TestCase):
         self.assertIn("too long", result["error"])
 
 
+class SocialStoreTest(unittest.TestCase):
+    """The social form's Store checkbox must actually store.
+
+    run_social used to accept the flag and silently drop it — the run
+    completed with no stored_run_id and the case table never changed.
+    Runs store as social_<platform> so one handle on two platforms lands
+    in two timelines and never diffs against itself.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._env = mock.patch.dict(
+            os.environ, {"SPYGLASS_HOME": self._tmp.name})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        import pathlib as _pathlib
+
+        import lens_extender.store as le_store
+        self._lens = mock.patch.multiple(
+            le_store,
+            STORE_DIR=_pathlib.Path(self._tmp.name) / "lens",
+            STORE_FILE=_pathlib.Path(self._tmp.name) / "lens" / "cases.db",
+        )
+        self._lens.start()
+        self.addCleanup(self._lens.stop)
+
+    def test_store_flag_stores_as_social_platform(self):
+        from spyglass_osint import store
+
+        from spyglass_pro.social import harness
+
+        fake = {"platform": "mastodon", "handle": "Gargron",                "found": True, "display_name": "Eugen",
+                "follower_count": 1}
+        with mock.patch.object(harness, "collect", return_value=dict(fake)):
+            result = runner.run_social("mastodon", "Gargron", {"store": "1"})
+        self.assertIn("stored_run_id", result)
+        cases = [c for c in runner.list_cases()
+                 if c["qtype"] == "social_mastodon"]
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0]["target"], "Gargron")
+        self.assertIn("username:gargron",
+                      store.timeline("Gargron", "social_mastodon")[0]["entities"])
+
+    def test_without_store_nothing_is_stored(self):
+        from spyglass_pro.social import harness
+
+        fake = {"platform": "bluesky", "handle": "x.bsky.social",
+                "found": True}
+        with mock.patch.object(harness, "collect", return_value=dict(fake)):
+            result = runner.run_social("bluesky", "x.bsky.social", {})
+        self.assertNotIn("stored_run_id", result)
+        self.assertEqual(runner.list_cases(), [])
+
+    def test_errored_run_is_not_stored(self):
+        from spyglass_pro.social import harness
+
+        with mock.patch.object(harness, "collect",
+                               return_value={"error": "boom", "platform": "mastodon",
+                                             "handle": "nobody"}):
+            result = runner.run_social("mastodon", "nobody", {"store": "1"})
+        self.assertNotIn("stored_run_id", result)
+        self.assertEqual(runner.list_cases(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

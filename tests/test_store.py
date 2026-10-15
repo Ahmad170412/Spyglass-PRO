@@ -72,6 +72,15 @@ class StoreTest(unittest.TestCase):
         self.assertIn("org:acme inc", kv)
         self.assertIn("email:a@acme.com", kv)
 
+    def test_entities_social_indexes_the_handle(self):
+        """Social runs store as social_<platform>; the handle is the node."""
+        for qtype in ("social", "social_mastodon", "social_bluesky", "social_instagram"):
+            ents = store._entities({"handle": "Gargron", "platform": "mastodon"}, qtype)
+            self.assertIn(("username", "gargron"), ents, qtype)
+
+    def test_entities_social_ignores_missing_handle(self):
+        self.assertEqual(store._entities({"platform": "mastodon"}, "social_mastodon"), [])
+
 
 if __name__ == "__main__":
     unittest.main()

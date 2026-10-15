@@ -187,6 +187,11 @@ def _entities(result, qtype):
         for s in (result.get("breach") or {}).get("sources", []) or []:
             if isinstance(s, dict) and s.get("name"):
                 add("breach", s["name"])
+    elif (qtype == "social" or qtype.startswith("social_")) and result.get("handle"):
+        # The dashboard stores social runs as social_<platform> so one
+        # handle on two platforms never diffs against itself. The handle
+        # is the stable node; display names change freely.
+        add("username", result["handle"])
     return out
 
 

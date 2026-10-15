@@ -310,7 +310,28 @@ class MastodonNormalizeTest(unittest.TestCase):
         self.assertEqual(result["post_count"], 7)
 
     def test_only_verified_links_survive(self):
-        self.assertEqual(self._result()["external_links"], ["example.com"])
+        self.assertEqual(self._result()["external_links"], ["https://example.com"])
+
+    def test_rich_link_markup_yields_the_href(self):
+        """Mastodon wraps display hosts in invisible scheme spans, which
+        tag-stripping turned into 'https:// example.com' (note the space).
+        The href is the verified URL — parse it."""
+        from spyglass_pro.social.platforms import mastodon
+
+        result = schema.new_result("mastodon", "example")
+        account = dict(MASTODON_ACCOUNT, fields=[
+            {"name": "Web",
+             "value": '<a href="https://example.com" rel="me"><span class="invisible">https://</span><span>example.com</span></a>',
+             "verified_at": "2021-05-05T00:00:00.000Z"},
+        ])
+        mastodon.normalize(account, result)
+        self.assertEqual(result["external_links"], ["https://example.com"])
+
+    def test_non_http_href_is_dropped(self):
+        from spyglass_pro.social.platforms import mastodon
+
+        self.assertEqual(mastodon._link_href('<a href="javascript:alert(1)">x</a>'), "")
+        self.assertEqual(mastodon._link_href("no anchor here"), "")
 
     def test_lists_are_walls_not_empty_lists(self):
         result = self._result()

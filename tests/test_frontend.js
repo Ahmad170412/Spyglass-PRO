@@ -333,5 +333,36 @@ console.log('== social preflight tells the truth ==');
   }
 })();
 
+console.log('== social session honesty ==');
+(function () {
+  sandbox.SOCIAL_META = { mastodon: { browser: false }, instagram: { browser: true } };
+  const keyless = sandbox.renderSocial({ platform: 'mastodon', handle: 'u' });
+  check('keyless shows no-session line, not red logged-out',
+    keyless.includes('none needed (keyless)') && !keyless.includes('logged out'), keyless.slice(0, 300));
+  const insta = sandbox.renderSocial({ platform: 'instagram', handle: 'u' });
+  check('instagram keeps logged-out', insta.includes('logged out'), insta.slice(0, 200));
+  const burner = sandbox.renderSocial({ platform: 'instagram', handle: 'u', logged_in: true });
+  check('burner login shown', burner.includes('burner logged in'), burner.slice(0, 200));
+})();
+
+console.log('== social plurals and dates ==');
+(function () {
+  check('1 like / 2 likes',
+    sandbox.pluralize(1, 'like') === '1 like' && sandbox.pluralize(2, 'like') === '2 likes'
+    && sandbox.pluralize(0, 'comment') === '0 comments');
+  const posts = sandbox.renderSocial({ platform: 'mastodon', handle: 'u',
+    posts: [{ caption: 'hi', likes: 1, comments: 2, timestamp: '2024-05-01T10:00:00.000Z', url: '' }] });
+  check('post meta pluralizes with date',
+    posts.includes('1 like') && posts.includes('2 comments') && posts.includes('2024-05-01'), posts.slice(0, 400));
+  const joined = sandbox.renderSocial({ platform: 'mastodon', handle: 'u', joined: '2016-03-16T00:00:00.000Z' });
+  check('joined sliced to date', joined.includes('2016-03-16') && !joined.includes('00:00:00'), joined.slice(0, 300));
+})();
+
+console.log('== run timestamps read uniformly ==');
+check('lens microseconds trimmed',
+  sandbox.fmtRunAt('2026-10-03T12:14:52.896458+00:00') === '2026-10-03T12:14:52');
+check('spyglass stamps untouched', sandbox.fmtRunAt('2026-10-03T15:52:04') === '2026-10-03T15:52:04');
+check('missing stamp is blank', sandbox.fmtRunAt(null) === '');
+
 console.log(`\n${'='.repeat(40)}\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

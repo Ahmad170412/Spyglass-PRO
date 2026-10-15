@@ -43,6 +43,7 @@ _UA = (
 
 _WS_RE = _re.compile(r"\s+")
 _TAG_RE = _re.compile(r"<[^>]+>")
+_HREF_RE = _re.compile(r'href\s*=\s*"([^"]+)"')
 
 
 def _text(value) -> str:
@@ -50,6 +51,22 @@ def _text(value) -> str:
     if not value:
         return ""
     return _WS_RE.sub(" ", _html.unescape(_TAG_RE.sub(" ", str(value)))).strip()
+
+
+def _link_href(value) -> str:
+    """The href inside a verified profile-field fragment.
+
+    The link *text* is Mastodon rich-link markup — invisible scheme
+    spans around the display host — so tag-stripping the fragment yields
+    "https:// github.com/x" (note the space). The href attribute is the
+    actual verified URL; parse it instead of stripping. http(s) only:
+    a server-returned fragment is third-party content.
+    """
+    match = _HREF_RE.search(str(value or ""))
+    if not match:
+        return ""
+    href = _html.unescape(match.group(1)).strip()
+    return href if href.startswith(("http://", "https://")) else ""
 
 
 def _host_of(url: str) -> str:
@@ -93,9 +110,11 @@ def normalize(account: dict, result: dict) -> None:
     result["found"] = True
 
     fields = [f for f in (account.get("fields") or []) if isinstance(f, dict)]
-    links = [f.get("value", "") for f in fields if f.get("verified_at")]
-    # Verified profile fields are HTML fragments ("<a ...>example.com</a>").
-    links = [_text(link) for link in links if _text(link)]
+    # Verified fields are HTML fragments; the href is the verified URL.
+    # (Tag-stripping the fragment mangles Mastodon's rich-link markup
+    # into "https:// host" — parse, don't strip.)
+    links = [_link_href(f.get("value", "")) for f in fields if f.get("verified_at")]
+    links = [link for link in links if link]
 
     set_fields(
         result,

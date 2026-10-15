@@ -944,6 +944,14 @@ def run_social(platform, handle, payload, progress=None):
                 from spyglass_osint import export as sg_export
                 _add_artifact(response, sg_export.json_output(
                     result, handle, f"social_{platform}"), "json")
+            # Stored as social_<platform> so one handle on two platforms
+            # lands in two timelines and never diffs against itself.
+            if payload.get("store"):
+                from spyglass_osint import store as sg_store
+                run_id = sg_store.store_result(
+                    result, f"social_{platform}", handle)
+                if run_id:
+                    response["stored_run_id"] = run_id
         except Exception as exc:
             response["artifact_error"] = _safe_error(exc)
     _attach_facts(response, "social", handle)
