@@ -1387,6 +1387,52 @@ tr:hover .case-del {
 
 .case-ents-row .chip-group { margin: 4px 0; }
 
+/* ── Investigation correlations: verdict first, links lit ── */
+.corr-list { list-style: none; padding-left: 0; }
+
+.corr-list li {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  margin-bottom: 8px;
+}
+
+.corr-list li.corr-match {
+  border-color: var(--accent-line);
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(180deg, rgba(255,43,43,0.06), transparent);
+}
+
+.chip-match {
+  border-color: var(--accent-line);
+  color: var(--fg);
+  box-shadow: 0 0 8px rgba(255, 43, 43, 0.25);
+}
+
+/* ── Entity summary graph ── */
+.entity-graph { margin: 4px auto 12px; max-width: 460px; }
+
+.entity-graph svg { width: 100%; height: auto; display: block; }
+
+.graph-edge { stroke: var(--border); stroke-width: 1.5; }
+
+.graph-node { fill: var(--bg3); stroke: var(--border); }
+
+.graph-label {
+  fill: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.graph-center { fill: rgba(255,43,43,0.12); stroke: var(--accent-line); }
+
+.graph-center-label {
+  fill: var(--fg);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
