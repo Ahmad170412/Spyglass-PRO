@@ -78,25 +78,29 @@ _BB_DIR  = os.path.dirname(_BB) if _BB else None
 _PHONEINFOGA = shutil.which("phoneinfoga")
 _IGNORANT = shutil.which("ignorant")
 
+# Blackbird is a git clone, not a console script, so it is never on PATH
+# even when installed -- these are the layouts its own installer uses.
+# The POSIX-only paths are kept (they are the common case on Linux/macOS)
+# but the Windows locations are now probed too: pipx on Windows installs
+# into %USERPROFILE%\.local\bin or %USERPROFILE%\.pyx\bin, and a manual
+# clone lands wherever the user put it. Without these, blackbird is
+# unreachable on Windows no matter how it was installed.
+#
+# Kept as a constant (not inline) so the dashboard's /api/status probe
+# and scripts/install_tools.py mirror this list instead of each
+# maintaining a forked copy that drifts.
+_BB_HOME = os.path.expanduser("~")
+_BLACKBIRD_PATHS = (
+    "/opt/blackbird/blackbird.py",                              # Linux (git clone)
+    os.path.join(_BB_HOME, ".local", "bin", "blackbird", "blackbird.py"),  # pipx-style
+    "/opt/homebrew/bin/blackbird.py",                           # macOS (Apple Silicon)
+    "/usr/local/bin/blackbird.py",                              # macOS (Intel)
+    os.path.join(_BB_HOME, "blackbird", "blackbird.py"),         # manual clone
+    os.path.join(_BB_HOME, ".pyx", "bin", "blackbird", "blackbird.py"),  # Windows pipx
+)
+
 if not _BB:
-    # Blackbird is a git clone, not a console script, so it is never on PATH
-    # even when installed -- these are the layouts its own installer uses.
-    # The POSIX-only paths are kept (they are the common case on Linux/macOS)
-    # but the Windows locations are now probed too: pipx on Windows installs
-    # into %USERPROFILE%\.local\bin or %USERPROFILE%\.pyx\bin, and a manual
-    # clone lands wherever the user put it. Without these, blackbird is
-    # unreachable on Windows no matter how it was installed.
-    _home = os.path.expanduser("~")
-    for _p in [
-        "/opt/blackbird/blackbird.py",                              # Linux (git clone)
-        os.path.join(_home, ".local", "bin", "blackbird", "blackbird.py"),  # Linux (pipx-style)
-        "/opt/homebrew/bin/blackbird.py",                           # macOS (Apple Silicon)
-        "/usr/local/bin/blackbird.py",                              # macOS (Intel)
-        os.path.join(_home, "blackbird", "blackbird.py"),           # macOS/Linux (git clone)
-        os.path.join(_home, ".local", "bin", "blackbird", "blackbird.py"),   # Windows (pipx, POSIX-style)
-        os.path.join(_home, ".pyx", "bin", "blackbird", "blackbird.py"),     # Windows (pipx, native)
-        os.path.join(_home, "blackbird", "blackbird.py"),           # Windows (git clone)
-    ]:
+    for _p in _BLACKBIRD_PATHS:
         if os.path.isfile(_p):
             _BB = _p
             _BB_DIR = os.path.dirname(_p)

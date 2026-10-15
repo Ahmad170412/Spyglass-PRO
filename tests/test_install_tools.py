@@ -30,7 +30,7 @@ class DetectionMirrorTest(unittest.TestCase):
 
         utils = (Path(__file__).resolve().parents[1] / "spyglass_pro"
                  / "modules" / "spyglass_osint" / "utils.py").read_text()
-        block = utils.split("for _p in [", 1)[1].split("]:", 1)[0]
+        block = utils.split("_BLACKBIRD_PATHS = (", 1)[1].split(")", 1)[0]
         home = os.path.expanduser("~")
 
         locations = set(re.findall(r'"(/[^"]+)"', block))

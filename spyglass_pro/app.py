@@ -172,6 +172,8 @@ def api_status():
     """
     tools = {name: bool(_which_any(*candidates))
              for name, candidates in _TOOL_PROBES.items()}
+    # Blackbird is the one tool the engine resolves beyond PATH.
+    tools["blackbird"] = _blackbird_present()
     platforms = []
     try:
         platforms = runner.social_platforms()
@@ -201,6 +203,22 @@ def api_status():
 
 def _which_any(*names):
     return next((shutil.which(name) for name in names if shutil.which(name)), None)
+
+
+def _blackbird_present():
+    """Blackbird detection matching the engine's own resolution.
+
+    The engine (spyglass_osint.utils) falls back to fixed clone layouts
+    when the name is not on PATH; the status probe must do the same or
+    the dashboard reports a tool missing that scans would actually use.
+    """
+    if _which_any("blackbird", "blackbird.py"):
+        return True
+    try:
+        from spyglass_osint.utils import _BLACKBIRD_PATHS
+    except Exception:
+        return False
+    return any(os.path.isfile(path) for path in _BLACKBIRD_PATHS)
 
 
 def _module_imports(name):

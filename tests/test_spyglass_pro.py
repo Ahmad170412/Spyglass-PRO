@@ -642,6 +642,32 @@ class AsyncSubmitTest(unittest.TestCase):
         self.assertNotIn(runner.REJECTED_KEY, resp.get_json())
 
 
+class BlackbirdProbeAgreementTest(unittest.TestCase):
+    """The status probe must agree with the engine's own resolution.
+
+    The engine falls back to fixed clone layouts when blackbird is not
+    on PATH; a probe using which() alone once reported the tool missing
+    on a machine where scans would have used it.
+    """
+
+    def test_fallback_file_counts_as_present(self):
+        import tempfile
+
+        from spyglass_pro.app import _blackbird_present
+        with tempfile.TemporaryDirectory() as tmp:
+            script = os.path.join(tmp, "blackbird.py")
+            pathlib.Path(script).write_text("# fake blackbird\n")
+            with mock.patch("shutil.which", return_value=None), \
+                 mock.patch("spyglass_osint.utils._BLACKBIRD_PATHS", [script]):
+                self.assertTrue(_blackbird_present())
+
+    def test_nothing_anywhere_counts_as_missing(self):
+        from spyglass_pro.app import _blackbird_present
+        with mock.patch("shutil.which", return_value=None), \
+             mock.patch("spyglass_osint.utils._BLACKBIRD_PATHS", []):
+            self.assertFalse(_blackbird_present())
+
+
 class AuditFixTest(unittest.TestCase):
     """October audit fixes: validation must cover every dispatch path."""
 
