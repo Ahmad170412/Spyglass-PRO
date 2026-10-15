@@ -48,6 +48,19 @@ jobs:
         # every module must still import and every degrade path must hold.
         run: python tests/run_tests.py
 
+  test-macos:
+    name: test (macOS, py3.12)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - name: Test suite (offline, no browser)
+        run: python tests/run_tests.py
+
   package:
     name: build
     runs-on: ubuntu-latest

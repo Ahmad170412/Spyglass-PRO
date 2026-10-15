@@ -7,6 +7,7 @@
 ### One dashboard. Three recon engines. **Zero packets sent to your target.**
 
 [![CI](https://github.com/Ahmad170412/Spyglass-PRO/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmad170412/Spyglass-PRO/actions)
+[![PyPI version](https://img.shields.io/pypi/v/spyglass-pro.svg)](https://pypi.org/project/spyglass-pro/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-06b6d4.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![Passive only](https://img.shields.io/badge/recon-passive--only-6366f1?logo=shield&logoColor=white)](#passive-only)
@@ -17,6 +18,8 @@
 </div>
 
 ---
+
+![Spyglass-Pro overview — stat cards and the per-module data-source grid](docs/screenshots/dashboard-overview.png)
 
 ## Why Spyglass-Pro?
 
@@ -70,6 +73,13 @@ a target, and how do I know the answer is real?**
 Copy-paste ready. No API keys, no accounts, no configuration.
 
 ```bash
+pip install spyglass-pro
+spyglass-pro
+```
+
+Or from source:
+
+```bash
 git clone https://github.com/Ahmad170412/Spyglass-PRO.git && cd Spyglass-PRO
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
@@ -102,7 +112,7 @@ launch agent instead of a login shell.
 | **Username** | sherlock + maigret + user-scanner + blackbird, with four-way overlap categories |
 | **Phone** | phoneinfoga + ignorant, plus breach correlation |
 | **IP Address** | InternetDB, RDAP, RIPEstat, reverse DNS, DNSBL, Shodan |
-| **Dark web** | HIBP, IntelX, DeHashed, onion lookup via Tor |
+| **Dark web** | Ahmia onion-index search, LeakCheck + Scylla breach data, keyed IntelX + HIBP |
 | **Investigation** | Runs every engine in parallel and correlates shared emails, IPs, domains and usernames |
 | **OPSEC** | Local self-check: your real IP, proxy status, DNS-leak exposure, timezone/geo fingerprint risk |
 | **Metadata** | ExifTool + PDF/OOXML/image fallbacks, MD5/SHA-256, GPS, with file-type reconciliation |
@@ -150,7 +160,7 @@ pip install -e .
 Then:
 
 ```bash
-python run.py                 # dev server on 127.0.0.1:5000
+python run.py                 # serves on 127.0.0.1:5000 (waitress; Flask dev server only with --debug)
 python -m spyglass_pro        # equivalent
 spyglass-pro                  # console entry point
 ```
@@ -182,15 +192,11 @@ python scripts/install_tools.py --check    # report which are missing
 python scripts/install_tools.py            # install the missing ones
 ```
 
-This covers sherlock, maigret, holehe, ignorant, blackbird and torsocks. The
-script is idempotent — re-running it only installs what is still missing.
-
-Phone lookup additionally uses `phoneinfoga` and `user-scanner`:
-
-```bash
-brew install phoneinfoga                   # macOS
-pipx install user-scanner                  # or: pip install user-scanner
-```
+This covers sherlock, maigret, holehe, ignorant, blackbird, user-scanner,
+shodan, phoneinfoga, exiftool, dig/whois/curl and torsocks — every tool the
+dashboard can detect. The script is idempotent — re-running it only installs
+what is still missing. Python CLIs install via pipx (isolated venvs, no
+dependency conflicts); system tools via brew or apt.
 
 ### What you get without them
 
@@ -200,7 +206,7 @@ what a bare install can and cannot do:
 | Module | With engines | Without engines |
 | --- | --- | --- |
 | Email | holehe + user-scanner + blackbird sweeps, plus breach | **breach data only** |
-| Username | sherlock + maigret + blackbird sweeps, plus breach | **breach data only** |
+| Username | sherlock + maigret + user-scanner + blackbird sweeps, plus breach | **breach data only** |
 | Phone | phoneinfoga + ignorant, plus breach | **breach data only** |
 
 Breach checking (LeakCheck + Scylla) needs no account and no CLI tool, so it
@@ -305,6 +311,10 @@ curl "http://127.0.0.1:5000/api/cases/diff?target=example.com&qtype=website" \
 | `GET /api/social/platforms` | Registered adapters and their capabilities |
 | `POST /api/social/run` | Collect one social profile |
 | `GET /api/cases` · `/diff` · `/timeline` · `/profile` | Stored-run queries |
+| `DELETE /api/cases/run` | Delete one stored run (and its entity rows) |
+| `GET /api/jobs` · `/api/job/<id>` · `/api/stream/<id>` | Async job registry, polling, live SSE log |
+| `GET /api/settings` · `POST /api/settings` | API-key vault (masked read) and proxy config |
+| `GET /api/healthz` | Liveness plus pool saturation |
 | `GET/POST /api/proxy` | Read or set the outbound proxy (scheme-validated) |
 
 A busy server returns **HTTP 429** for a full job queue, distinct from a scan
@@ -336,20 +346,22 @@ report artifacts from a scan land in the working directory of the run.
 .venv/bin/python tests/run_tests.py
 ```
 
-**308 offline checks** — the three engines' own suites plus the merge layer
+**443 offline checks** — the three engines' own suites plus the merge layer
 (API surface, auth gate, proxy validation, job pool, target validation, case
 queries, cross-platform filename and decoding behaviour). No network, no
 browser, finishes in about a second.
 
-CI runs the suite on Python 3.10–3.13, lints with `ruff`, and asserts the built
+CI runs the suite on Python 3.10–3.13 (plus macOS), lints with `ruff`, and asserts the built
 wheel actually carries `LICENSE`, `NOTICE` and all three vendored engines.
 
 ---
 
 ## Platforms
 
-macOS, Linux and Windows are supported, and the suite runs on each. Two
-platform differences are worth knowing before you file a bug:
+macOS, Linux and Windows are supported. CI runs the suite on Ubuntu
+(Python 3.10–3.13) and macOS; Windows ships documented fallbacks for the
+tools it lacks. Two platform differences are worth knowing before you file
+a bug:
 
 - **Windows has no `dig` or `whois`.** The DNS legs fall back to Python's
   resolver and the HTTP legs to `urllib`, so the modules still run — but DNS
@@ -366,7 +378,7 @@ platform differences are worth knowing before you file a bug:
 ```
 run.py                     dev entry point
 scripts/install_tools.py   idempotent CLI-engine installer
-tests/                     308 offline checks (run_tests.py)
+tests/                     443 offline checks (run_tests.py)
 assets/logo.svg            README logo
 spyglass_pro/
   app.py                   Flask routes + auth gate + proxy validation
@@ -380,7 +392,7 @@ spyglass_pro/
 
 The three engines live behind a directory boundary on purpose, so the next sync
 from upstream is mechanical. `NOTICE` records exactly where each copy differs
-from its origin — including the four bug fixes that exist only here.
+from its origin — including the bug fixes that exist only here.
 
 ---
 
