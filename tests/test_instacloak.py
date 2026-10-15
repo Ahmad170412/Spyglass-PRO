@@ -280,7 +280,10 @@ def test_login_config_roundtrip():
     """save_login_config writes/replaces [login], preserving other sections."""
     import tempfile
 
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10: tomli backport (requirements.txt)
+        import tomli as tomllib
 
     with tempfile.TemporaryDirectory() as tmp:
         cfg = Path(tmp) / "config.toml"

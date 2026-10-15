@@ -6,3 +6,6 @@ cryptography>=42.0.0
 httpx>=0.27
 phonenumbers>=8.13
 waitress>=2.0
+# Test-only backport: the suite supports 3.10 but tomllib is 3.11+.
+# Pinned by test_login_config_roundtrip, which must parse TOML everywhere.
+tomli>=2.0; python_version < "3.11"
