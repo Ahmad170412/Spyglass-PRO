@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Install the optional CLI engines that Spyglass-Pro's identity modules shell out to.
+"""Install the optional CLI engines that Spyglass-Pro's recon legs shell out to.
 
-The email, username and phone modules are thin orchestrators: they resolve six
-external tools on ``PATH`` (see ``spyglass_pro/modules/spyglass_osint/utils.py``)
-and skip themselves with a message when one is absent. Nothing in this
-repository installs those tools, so a fresh clone reports three near-empty
-modules. This script closes that gap.
+The email, username, phone, website, IP and metadata modules resolve their
+tools on ``PATH`` (see ``spyglass_pro/app.py::_TOOL_PROBES`` and
+``spyglass_osint/utils.py``) and skip themselves with a message when one is
+absent. Nothing in this repository installs those tools, so a fresh clone
+reports near-empty modules. This script closes that gap — every tool the
+dashboard can detect has an installer or an honest manual pointer here.
 
 Detection mirrors ``utils.py`` exactly, including blackbird's fallback path
 scan, so "present" here means the same thing it means to the application.
@@ -34,13 +35,16 @@ import sys
 # ── detection (kept in sync with spyglass_osint/utils.py) ────────────────────
 
 # Blackbird is a git clone rather than a console script, so `which` misses it
-# and utils.py falls back to scanning these locations. Mirror that exactly.
+# and utils.py falls back to scanning these locations. Mirror that exactly
+# (utils.py also probes a Windows pipx dir; on Windows `~` expands to
+# %USERPROFILE% so the .local/.pyx entries cover it the same way).
 _BLACKBIRD_FALLBACKS = (
     "/opt/blackbird",
     os.path.expanduser("~/.local/bin/blackbird"),
     "/opt/homebrew/bin/blackbird.py",
     "/usr/local/bin/blackbird.py",
     os.path.expanduser("~/blackbird"),
+    os.path.expanduser("~/.pyx/bin/blackbird"),
 )
 
 
@@ -78,8 +82,16 @@ def _run(cmd):
 
 def _pipx_install(package):
     if not shutil.which("pipx"):
-        return False, "pipx not found — install it with: pipx install pipx"
+        return False, ("pipx not found — install it first: "
+                       "brew install pipx (macOS) or python3 -m pip install pipx")
     return _run(["pipx", "install", package])
+
+
+def _apt_install(*packages):
+    """apt-get branch shared by the system-package installers."""
+    if not shutil.which("apt-get"):
+        return None
+    return _run(["sudo", "apt-get", "install", "-y", *packages])
 
 
 def install_sherlock():
@@ -99,14 +111,56 @@ def install_ignorant():
 
 
 def install_blackbird():
-    ok, detail = _run(["git", "clone", "--depth", "1",
-                       "https://github.com/p1ngul1n0/blackbird.git",
-                       os.path.expanduser("~/blackbird")])
-    if ok:
-        return True, "cloned to ~/blackbird"
-    if os.path.isdir(os.path.expanduser("~/blackbird")):
+    home = os.path.expanduser("~/blackbird")
+    script = os.path.join(home, "blackbird.py")
+    if os.path.isfile(script):
         return True, "already cloned at ~/blackbird"
+    ok, detail = _run(["git", "clone", "--depth", "1",
+                       "https://github.com/p1ngul1n0/blackbird.git", home])
+    # A failed clone leaves the directory behind — a directory without the
+    # script is not an install, so verify the file, not the folder.
+    if os.path.isfile(script):
+        return True, "already cloned at ~/blackbird" if not ok else "cloned to ~/blackbird"
     return False, detail.splitlines()[-1] if detail else "git clone failed"
+
+
+def install_user_scanner():
+    return _pipx_install("user-scanner")
+
+
+def install_shodan():
+    return _pipx_install("shodan")
+
+
+def install_exiftool():
+    if shutil.which("brew"):
+        return _run(["brew", "install", "exiftool"])
+    apt = _apt_install("libimage-exiftool-perl")
+    if apt is not None:
+        return apt
+    return False, "install exiftool with: brew install exiftool"
+
+
+def install_phoneinfoga():
+    if shutil.which("brew"):
+        return _run(["brew", "install", "phoneinfoga"])
+    # No silent third-party apt repos: on Linux without brew this is manual.
+    return False, ("no brew found — on Debian/Ubuntu add the phoneinfoga apt "
+                   "repository (see github.com/sundowndev/phoneinfoga), then "
+                   "apt-get install phoneinfoga")
+
+
+def _have_sysutils():
+    return all(shutil.which(tool) for tool in ("dig", "whois", "curl"))
+
+
+def install_sysutils():
+    if shutil.which("brew"):
+        return _run(["brew", "install", "bind", "whois", "curl"])
+    apt = _apt_install("dnsutils", "whois", "curl")
+    if apt is not None:
+        return apt
+    return False, "install dig, whois and curl with your package manager"
 
 
 def install_torsocks():
@@ -129,6 +183,16 @@ TOOLS = {
                  "Checks which sites a phone number is registered on (enumeration)"),
     "blackbird": (_blackbird_path, install_blackbird,
                   "Email/username/phone sweep; git clone, no console script"),
+    "user-scanner": (lambda: _which("user-scanner"), install_user_scanner,
+                     "Email/username account sweeps"),
+    "shodan": (lambda: _which("shodan"), install_shodan,
+               "Shodan CLI (IP enrichment leg)"),
+    "phoneinfoga": (lambda: _which("phoneinfoga"), install_phoneinfoga,
+                    "Phone footprinting"),
+    "exiftool": (lambda: _which("exiftool"), install_exiftool,
+                 "Metadata extraction"),
+    "sysutils": (_have_sysutils, install_sysutils,
+                 "dig + whois + curl (DNS/WHOIS/HTTP legs)"),
     "torsocks": (lambda: _which("torsocks"), install_torsocks,
                  "Routes dig/whois over Tor for .onion — optional"),
 }
