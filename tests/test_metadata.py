@@ -97,8 +97,22 @@ class ExtractTest(unittest.TestCase):
         if _EXIFTOOL:
             self.assertEqual(result.get("FileType"), "TypeScript")
         else:
-            # Extension-table fallback still maps .ts to the stream entry.
-            self.assertEqual(result.get("file_type"), "video/mp2t")
+            # No exiftool: the extension table is the only signal, and it
+            # maps .ts to TypeScript — never the old stream entry.
+            self.assertEqual(result.get("file_type"), "text/x-typescript")
+
+    def test_typescript_fallback_without_exiftool(self):
+        """The no-exiftool path must hold on every machine, not only on
+        exiftool-less runners — CI caught a stale expectation here that
+        every dev machine silently skipped."""
+        from unittest import mock
+
+        path = _tmp_file(".ts", "const x: number = 1;\n")
+        self.addCleanup(os.unlink, path)
+        with mock.patch.object(metadata, "_EXIFTOOL", None):
+            result = metadata.extract(path)
+        self.assertNotIn("error", result)
+        self.assertEqual(result.get("file_type"), "text/x-typescript")
 
     def test_missing_file_is_an_error_not_a_crash(self):
         result = metadata.extract("/nonexistent/file.py")
