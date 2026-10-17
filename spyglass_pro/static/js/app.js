@@ -950,7 +950,8 @@ var SOCIAL_META = {};
    registry fetch resolving. Derived labels (capitalize(key)) read wrong
    for GitHub; this map only ever paints a name, never gates behaviour. */
 var SOCIAL_FALLBACK_LABELS = {
-  instagram: 'Instagram', mastodon: 'Mastodon', bluesky: 'Bluesky', github: 'GitHub'
+  instagram: 'Instagram', mastodon: 'Mastodon', bluesky: 'Bluesky',
+  github: 'GitHub', gitlab: 'GitLab'
 };
 
 function socialLabel(key) {
@@ -979,7 +980,8 @@ function setSocialPlaceholder(key) {
     instagram: 'instagram username',
     mastodon: 'user or user@instance',
     bluesky: 'user.bsky.social',
-    github: 'github username or org'
+    github: 'github username or org',
+    gitlab: 'gitlab username or org'
   };
   input.placeholder = hints[key] || 'handle';
 }

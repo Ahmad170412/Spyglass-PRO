@@ -92,11 +92,12 @@ class FrontendSchemaMirrorTest(unittest.TestCase):
 class RegistryTest(unittest.TestCase):
     def test_bundled_platforms_register(self):
         keys = [platform["key"] for platform in registry.describe()]
-        for expected in ("instagram", "mastodon", "bluesky", "github"):
+        for expected in ("instagram", "mastodon", "bluesky", "github",
+                         "gitlab"):
             self.assertIn(expected, keys)
 
     def test_keyless_platforms_need_no_browser_or_login(self):
-        for key in ("mastodon", "bluesky", "github"):
+        for key in ("mastodon", "bluesky", "github", "gitlab"):
             platform = registry.get(key)
             self.assertEqual(platform.login, "none")
             self.assertFalse(platform.browser)
@@ -573,6 +574,25 @@ class GitHubCollectTest(unittest.TestCase):
         self.assertIn("secondary rate limit", result["error"])
         self.assertNotIn("GITHUB_TOKEN", result["error"])
 
+    def test_token_lets_the_note_name_its_tier(self):
+        """With GITHUB_TOKEN in the environment the note says what was
+        actually sent — even if GitHub ever reported a keyless-sized
+        limit, the wording stays honest about the request's provenance."""
+        from unittest import mock
+
+        with mock.patch.dict("os.environ", {"GITHUB_TOKEN": "ghp_zzz"}):
+            result = self._run([
+                (200, dict(GITHUB_PROFILE),
+                 {"x-ratelimit-remaining": "4998",
+                  "x-ratelimit-limit": "5000"}),
+                (200, GITHUB_REPOS, {}),
+            ])
+        self.assertTrue(any(
+            "GitHub budget (GITHUB_TOKEN authenticated): 4998/5000" in n
+            for n in result["notes"]))
+        self.assertFalse(any(
+            "keyless" in n for n in result["notes"]))
+
     def test_renamed_account_is_reported_not_swapped(self):
         renamed = dict(GITHUB_PROFILE, login="octocat2")
         result = self._run([
@@ -591,6 +611,235 @@ class GitHubCollectTest(unittest.TestCase):
         ])
         self.assertTrue(result["found"])
         self.assertTrue(any("repos endpoint failed" in n for n in result["notes"]))
+
+
+GITLAB_PROFILE = {
+    # The short unauthenticated user object, byte-for-byte the fields
+    # gitlab.com/api/v4 serves: no bio, no location, no created_at —
+    # those are admin-only, so the adapter can never return them.
+    "id": 1,
+    "username": "sytses",
+    "public_email": "sid@example.com",
+    "name": "Sid Sijbrandij",
+    "state": "active",
+    "locked": False,
+    "avatar_url": "https://gitlab.com/uploads/-/system/user/avatar/1/a.png",
+    "web_url": "https://gitlab.com/sytses",
+}
+
+GITLAB_PROJECTS = [
+    {"id": 2230440, "name": "dotfiles", "description": "My dotfiles.",
+     "web_url": "https://gitlab.com/sytses/dotfiles", "star_count": 17,
+     "forks_count": 4, "last_activity_at": "2025-10-27T10:47:39.506Z",
+     "visibility": "public"},
+    {"id": 72353001, "name": "GitLab", "description": None,
+     "web_url": "https://gitlab.com/sytses/gitlab", "star_count": 0,
+     "forks_count": 0, "last_activity_at": "2025-08-06T17:01:49.329Z"},
+]
+
+
+class GitLabLoginValidationTest(unittest.TestCase):
+    """Handles are validated locally so a typo never burns budget."""
+
+    def _collect(self, handle, result=None):
+        from unittest import mock
+
+        from spyglass_pro.social.platforms import gitlab
+
+        result = result or schema.new_result("gitlab", handle)
+        with mock.patch.object(gitlab.httpx, "Client") as client:
+            gitlab.collect(None, {}, handle, result)
+        client.assert_not_called()  # validation must predate every request
+        return result
+
+    def test_valid_handles_pass_the_regex(self):
+        from spyglass_pro.social.platforms import gitlab
+        # dots, hyphens and underscores are legal *inside* a namespace
+        for handle in ("a", "sytses", "a-b_c.d", "0x-user.name", "A" * 255):
+            self.assertTrue(gitlab._LOGIN_RE.fullmatch(handle), handle)
+
+    def test_invalid_handles_never_reach_the_network(self):
+        for handle in ("-octo", ".octo", "_octo", "octo cat", "user@example.com",
+                       "", "a" * 256, "octo+evil"):
+            self.assertFalse(self._collect(handle)["found"])
+        error = self._collect("user@example.com")["error"]
+        self.assertIn("not a valid GitLab handle", error)
+
+
+class GitLabNormalizeTest(unittest.TestCase):
+    def _result(self, profile=None):
+        from spyglass_pro.social.platforms import gitlab
+
+        result = schema.new_result("gitlab", "sytses")
+        gitlab.normalize(profile if profile is not None else GITLAB_PROFILE,
+                         result)
+        return result
+
+    def test_maps_the_fields_the_short_object_actually_has(self):
+        result = self._result()
+        self.assertTrue(result["found"])
+        self.assertEqual(result["display_name"], "Sid Sijbrandij")
+        self.assertEqual(result["url"], "https://gitlab.com/sytses")
+        self.assertEqual(result["contact_email"], "sid@example.com")
+        self.assertEqual(result["avatar_url"],
+                         GITLAB_PROFILE["avatar_url"])
+
+    def test_admin_only_fields_stay_unset_not_zero_or_made_up(self):
+        """Bio/location/website/joined simply do not exist in the keyless
+        object — the schema's unset-empty rule covers the rest, and the
+        capability list never promises them. A silent-looking zero here
+        would read as '0 followers', which is not an answer the API gave."""
+        result = self._result()
+        self.assertIsNone(result["bio"])
+        self.assertIsNone(result["location"])
+        self.assertIsNone(result["joined"])
+        self.assertIsNone(result["follower_count"])
+
+    def test_published_public_email_only_when_nonempty(self):
+        result = self._result(dict(GITLAB_PROFILE, public_email=""))
+        self.assertIsNone(result["contact_email"])
+        result = self._result(dict(GITLAB_PROFILE, public_email=None))
+        self.assertIsNone(result["contact_email"])
+
+    def test_state_and_locked_are_notes_not_silent(self):
+        notes = self._result(
+            dict(GITLAB_PROFILE, state="banned"))["notes"]
+        self.assertTrue(any("'banned'" in n for n in notes))
+        notes = self._result(dict(GITLAB_PROFILE, locked=True))["notes"]
+        self.assertTrue(any("locked" in n for n in notes))
+        # An ordinary active account generates no state noise.
+        self.assertFalse(any("state" in n
+                             for n in self._result()["notes"]))
+
+    def test_missing_profile_is_not_found(self):
+        self.assertFalse(self._result({})["found"])
+
+    def test_projects_map_to_posts(self):
+        from spyglass_pro.social.platforms import gitlab
+
+        result = self._result()
+        gitlab.normalize_projects(GITLAB_PROJECTS, result)
+        (first, second) = result["posts"]
+        self.assertEqual(first["url"], "https://gitlab.com/sytses/dotfiles")
+        self.assertEqual(first["caption"], "My dotfiles.")
+        self.assertEqual(first["likes"], 17)    # stars
+        self.assertEqual(first["comments"], 4)  # forks
+        self.assertEqual(first["timestamp"], "2025-10-27T10:47:39.506Z")
+        # No description falls back to the project name, like the repos
+        # leg of the GitHub adapter — never an empty caption.
+        self.assertEqual(second["caption"], "GitLab")
+
+
+class GitlabCollectTest(unittest.TestCase):
+    """The networked paths, driven offline through mocked _get calls."""
+
+    def _run(self, side_effects, handle="sytses"):
+        from unittest import mock
+
+        from spyglass_pro.social.platforms import gitlab
+
+        result = schema.new_result("gitlab", handle)
+        with mock.patch.object(gitlab, "_get", side_effect=side_effects):
+            gitlab.collect(None, {}, handle, result)
+        return result
+
+    def test_success_maps_profile_and_projects(self):
+        headers = {"ratelimit-limit": "500", "ratelimit-remaining": "497"}
+        result = self._run([
+            (200, [dict(GITLAB_PROFILE)], headers),
+            (200, GITLAB_PROJECTS,
+             {**headers, "x-total": "22"}),
+        ])
+        self.assertTrue(result["found"])
+        self.assertEqual(result["source"], "gitlab.com/api/v4 (keyless)")
+        self.assertEqual(len(result["posts"]), 2)
+        # GitLab's own X-Total is the real public-project count.
+        self.assertEqual(result["post_count"], 22)
+        self.assertTrue(any("X-Total" in n for n in result["notes"]))
+        self.assertTrue(any("of 22 public projects" in n
+                            for n in result["notes"]))
+
+    def test_budget_note_reads_the_headers(self):
+        headers = {"ratelimit-limit": "500", "ratelimit-remaining": "494"}
+        result = self._run([
+            (200, [dict(GITLAB_PROFILE)], headers),
+            (200, GITLAB_PROJECTS, headers),
+        ])
+        self.assertTrue(any("494/500" in n for n in result["notes"]))
+
+    def test_token_changes_the_wording_not_the_math(self):
+        """Scope follows the request (GITLAB_TOKEN sent), never a guess
+        from the limit — GitLab serves some lookups with limit buckets
+        smaller than 500, and calling those 'authenticated' would be a
+        lie exactly where an operator is debugging throttles."""
+        from unittest import mock
+
+        with mock.patch.dict("os.environ", {"GITLAB_TOKEN": "glpat-zzz"}):
+            result = self._run([
+                (200, [dict(GITLAB_PROFILE)],
+                 {"ratelimit-limit": "1", "ratelimit-remaining": "0"}),
+                (200, GITLAB_PROJECTS, {}),
+            ])
+        self.assertTrue(any(
+            "GitLab budget (GITLAB_TOKEN authenticated): 0/1" in n
+            for n in result["notes"]))
+        self.assertFalse(any(
+            "keyless" in n for n in result["notes"]))
+
+    def test_missing_account_is_exact_because_the_miss_is_cheap(self):
+        """GET /users?username=X answers with an empty list — so 'no such
+        user' is exact here, not silence behind a throttled request."""
+        result = self._run([
+            (200, [], {"ratelimit-limit": "500",
+                       "ratelimit-remaining": "499"}),
+        ])
+        self.assertFalse(result["found"])
+        self.assertEqual(result["error"],
+                         "no GitLab account found for @sytses")
+
+    def test_exhausted_budget_is_named_with_its_reset(self):
+        """A 429 on a dry per-minute window must not read as 'no such user'."""
+        result = self._run([
+            (429, None, {"ratelimit-limit": "500",
+                         "ratelimit-remaining": "0"}),
+        ])
+        self.assertFalse(result["found"])
+        self.assertIn("budget exhausted", result["error"])
+        self.assertIn("500 requests/minute", result["error"])
+
+    def test_403_with_budget_left_names_the_secondary_limit(self):
+        result = self._run([
+            (403, None, {"ratelimit-limit": "500",
+                         "ratelimit-remaining": "500"}),
+        ])
+        self.assertFalse(result["found"])
+        self.assertIn("secondary rate limit", result["error"])
+        self.assertNotIn("budget exhausted", result["error"])
+
+    def test_failing_projects_leg_never_hides_the_profile(self):
+        """A partial result is honest: the profile stands, the missing
+        projects leg is named, and no count is invented without X-Total."""
+        headers = {"ratelimit-limit": "500", "ratelimit-remaining": "497"}
+        result = self._run([
+            (200, [dict(GITLAB_PROFILE)], headers),
+            (500, None, {}),
+        ])
+        self.assertTrue(result["found"])
+        self.assertIsNone(result["post_count"])   # unset, never a fake zero
+        self.assertTrue(any("recent projects unavailable" in n
+                            for n in result["notes"]))
+
+    def test_total_without_recent_list_stays_totalled(self):
+        """X-Total arrives even when the *first* page is empty; a zero
+        public-project account must not be denoted by a missing count."""
+        headers = {"ratelimit-limit": "500", "ratelimit-remaining": "494"}
+        result = self._run([
+            (200, [dict(GITLAB_PROFILE)], headers),
+            (200, [], {"x-total": "0"}),
+        ])
+        self.assertTrue(result["found"])
+        self.assertIsNone(result["post_count"])   # 0 is a count; None isn't
+        self.assertFalse(any("X-Total" in n for n in result["notes"]))
 
 
 INSTAGRAM_REPORT = {

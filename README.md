@@ -91,8 +91,8 @@ python run.py
 Open <http://127.0.0.1:5000>.
 
 That's it — **Website**, **IP Address**, **Full Investigation** and the
-keyless social panels (**GitHub**, **Mastodon**, **Bluesky**) work
-immediately on a bare install. To light up the email/username/phone panels:
+keyless social panels (**GitLab**, **GitHub**, **Mastodon**, **Bluesky**)
+work immediately on a bare install. To light up the email/username/phone panels:
 
 ```bash
 python scripts/install_tools.py --check    # see what's missing
@@ -118,7 +118,7 @@ launch agent instead of a login shell.
 | **Investigation** | Runs every engine in parallel and correlates shared emails, IPs, domains and usernames |
 | **OPSEC** | Local self-check: your real IP, proxy status, DNS-leak exposure, timezone/geo fingerprint risk |
 | **Metadata** | ExifTool + PDF/OOXML/image fallbacks, MD5/SHA-256, GPS, with file-type reconciliation |
-| **Social** | Instagram (stealth browser) + Mastodon, Bluesky and GitHub (keyless, instant), one registry-driven panel |
+| **Social** | Instagram (stealth browser) + GitLab, GitHub, Mastodon and Bluesky (keyless, instant), one registry-driven panel |
 | **Cases** | Encrypted-at-rest run history with entity diffing, timelines and dossier export |
 
 ---
@@ -178,8 +178,12 @@ wants a license key:
 pip install cloakbrowser
 ```
 
-GitHub, Mastodon and Bluesky are keyless JSON sources: they need no browser,
-no account and no key, and work on a bare install.
+GitLab, GitHub, Mastodon and Bluesky are keyless JSON sources: they need no
+browser, no account and no key, and work on a bare install. Both code forges
+fill the same panel shape from very different APIs — with GitLab's unauthenticated
+profile being the honest *short* form (name, handle, avatar, state, published
+email), so the panel's capability header never promises what the keyless API
+cannot return.
 
 </details>
 
@@ -349,7 +353,7 @@ report artifacts from a scan land in the working directory of the run.
 .venv/bin/python tests/run_tests.py
 ```
 
-**481 offline checks** — the three engines' own suites plus the merge layer
+**500 offline checks** — the three engines' own suites plus the merge layer
 (API surface, auth gate, proxy validation, job pool, target validation, case
 queries, cross-platform filename and decoding behaviour) and the node-checked
 dashboard JS. No network, no browser, finishes in a few seconds.
@@ -383,7 +387,7 @@ a bug:
 ```
 run.py                     dev entry point
 scripts/install_tools.py   idempotent CLI-engine installer
-tests/                     481 offline checks (run_tests.py)
+tests/                     500 offline checks (run_tests.py)
 assets/logo.svg            README logo
 spyglass_pro/
   app.py                   Flask routes + auth gate + proxy validation

@@ -21,6 +21,7 @@ noted rather than silently swapped, mirroring Mastodon's resolver note.
 
 from __future__ import annotations
 
+import os
 import re as _re
 
 import httpx
@@ -129,18 +130,45 @@ def _remaining(headers: dict) -> int | None:
         return None
 
 
-def _budget_note(headers: dict, result: dict) -> None:
+def _limit(headers: dict) -> int | None:
+    """The budget's size as GitHub reports it — 60 keyless, 5000 with a
+    token. Reading the number beats hardcoding it, so the note stays true
+    through whatever tier this request actually ran under."""
+    try:
+        return int(headers.get("x-ratelimit-limit", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _budget_note(headers: dict, result: dict, authenticated: bool = False) -> None:
     """Say plainly what the collection cost and what is left.
 
     Sixty keyless requests an hour per IP is a real operational limit —
     an operator mixing email sweeps and GitHub lookups can exhaust it
-    without noticing unless the number is on the result.
+    without noticing unless the number is on the result. The limit in
+    the note comes from the response; the tier wording follows what the
+    request actually *sent* (the GITHUB_TOKEN environment variable).
     """
     remaining = _remaining(headers)
     if remaining is None:
         return
-    add_note(result, f"keyless GitHub budget: {remaining}/{_KEYLESS_LIMIT} "
-                     "requests left this hour from this IP")
+    limit = _limit(headers) or _KEYLESS_LIMIT
+    scope = ("GitHub budget (GITHUB_TOKEN authenticated)"
+             if authenticated else "keyless GitHub budget")
+    add_note(result, f"{scope}: {remaining}/{limit} requests left this "
+                     "hour from this IP")
+
+
+def _auth_headers(headers: dict) -> dict:
+    """Honour GITHUB_TOKEN from the environment when present — it lifts
+    the 60/hour keyless IP budget to the authenticated 5,000/hour.
+    Optional: the keyless path never requires it and never pretends it
+    was used (the budget note's tier wording changes with the request,
+    not with a guessed limit)."""
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def collect(page, cfg, handle: str, result: dict) -> None:
@@ -154,7 +182,7 @@ def collect(page, cfg, handle: str, result: dict) -> None:
         return
     result["handle"] = handle
 
-    headers = {"Accept": "application/vnd.github+json"}
+    headers = _auth_headers({"Accept": "application/vnd.github+json"})
     try:
         with httpx.Client(timeout=_TIMEOUT, headers=headers,
                           follow_redirects=True) as client:
@@ -165,8 +193,9 @@ def collect(page, cfg, handle: str, result: dict) -> None:
             if status in (403, 429) and _remaining(rh) == 0:
                 result["error"] = (
                     "keyless GitHub budget exhausted (60 requests/hour per "
-                    "IP) — set a GITHUB_TOKEN in the settings vault to use "
-                    "the authenticated 5,000/hour budget, or retry later"
+                    "IP) — set a GITHUB_TOKEN environment variable to use "
+                    "the authenticated 5,000/hour budget, or retry after "
+                    "the hour rolls over"
                 )
                 return
             if status in (403, 429):
@@ -189,7 +218,7 @@ def collect(page, cfg, handle: str, result: dict) -> None:
                 # identities (same policy as Mastodon's resolver note).
                 add_note(result, f"@{handle} is now @{profile.get('login')} "
                                  "(account renamed)")
-            _budget_note(rh, result)
+            _budget_note(rh, result, authenticated=bool(_auth_headers({})))
             normalize(profile, result)
             result["source"] = "api.github.com (keyless)"
             if result.get("post_count"):

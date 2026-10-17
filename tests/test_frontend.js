@@ -224,6 +224,7 @@ console.log('== keyless tabs hide browser options ==');
       { key: 'mastodon', label: 'Mastodon', login: 'none', browser: false, capabilities: [] },
       { key: 'bluesky', label: 'Bluesky', login: 'none', browser: false, capabilities: [] },
       { key: 'github', label: 'GitHub', login: 'none', browser: false, capabilities: [] },
+      { key: 'gitlab', label: 'GitLab', login: 'none', browser: false, capabilities: [] },
     ];
     sandbox.showCaps(list, 'mastodon');
     check('keyless tab hides headless/deep/media',
@@ -237,6 +238,11 @@ console.log('== keyless tabs hide browser options ==');
     check('new keyless tab behaves like the others',
       burnerRow.style.display === 'none'
       && labels.every((l) => l.style.display === 'none'), burnerRow.style.display);
+    sandbox.showCaps(list, 'gitlab');
+    check('gitlab behaves like every other keyless tab',
+      burnerRow.style.display === 'none'
+      && labels.every((l) => l.style.display === 'none')
+      && !caps.textContent.includes('not in this server'), caps.textContent);
     sandbox.showCaps(list, 'no-such-platform');
     check('platform unknown to the server names the gap and hides browser options',
       caps.textContent.includes('not in this server') && labels.every((l) => l.style.display === 'none'),
@@ -269,6 +275,12 @@ console.log('== keyless tabs hide browser options ==');
       fields.socialPlatform.value === 'github'
       && fields.socialPlatformName.textContent === 'GitHub'
       && fields.socialHandle.placeholder.includes('github'),
+      fields.socialPlatform.value + ' / ' + fields.socialPlatformName.textContent);
+    sandbox.selectSocialPlatform('gitlab');
+    check('gitlab click wins the form without a registry answer',
+      fields.socialPlatform.value === 'gitlab'
+      && fields.socialPlatformName.textContent === 'GitLab'
+      && fields.socialHandle.placeholder.includes('gitlab'),
       fields.socialPlatform.value + ' / ' + fields.socialPlatformName.textContent);
   } finally {
     sandbox.document.getElementById = realGet;

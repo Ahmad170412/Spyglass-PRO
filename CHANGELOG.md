@@ -7,8 +7,8 @@ may not disagree (a pinning test fails if they do).
 
 ## 1.1.0 — 2026-10-17
 
-Hardening release: no changes to any module's output semantics — one new
-keyless data source, plus release-quality fixes to the seams that could drift
+Hardening release: no changes to any module's output semantics — two new
+keyless data sources, plus release-quality fixes to the seams that could drift
 between versions.
 
 **Added**
@@ -23,6 +23,26 @@ between versions.
   the remaining budget on the result. Follower/following lists are walls,
   like every other keyless adapter. No browser, no login, no key — works on
   a bare install.
+- **GitLab** social source, keyless through `gitlab.com/api/v4`, proving the
+  keyless contract generalizes across forges. GitLab's unauthenticated user
+  object is the honest *short* form — name, handle, avatar, instance URL,
+  account state and a published email — so bio/location/website/joined are
+  **not promised** in the panel's capability header and never fabricated;
+  public projects carry the substance (name, description, stars, forks,
+  last activity as the account's post list), with `post_count` taken from
+  GitLab's own `X-Total` header rather than guessed, unset when GitLab
+  doesn't answer it. Unknown handles answer with an empty list rather than
+  a 404, so the "no such user" verdict is exact and cheap; handles are
+  validated locally (dots/hyphens/underscores legal mid-name) before any
+  budget is spent; locked/banned states are notes on the result. The
+  keyless budget is GitLab's own number (500 requests/minute per IP,
+  read from the instance's rate headers, never assumed).
+- **Optional forge tokens from the environment.** Both adapters honour a
+  `GITHUB_TOKEN` / `GITLAB_TOKEN` environment variable when set and report
+  the budget tier the *response* actually came back with ("keyless GitHub
+  budget: 58/60 …" vs "GitHub budget (GITHUB_TOKEN authenticated): …").
+  The never-there vault wording is gone from the exhausted-budget error:
+  the message and the capability of the app now match.
 
 **Fixed**
 
