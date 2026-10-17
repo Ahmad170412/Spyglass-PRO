@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from typing import Literal
 
 from rich.console import Console
 from rich.text import Text
@@ -79,6 +80,7 @@ def _make_console() -> Console:
     off; otherwise rich's own detection (real TTY) decides.
     """
     force = os.environ.get("INSTACLOAK_COLOR")
+    color_system: Literal["standard", None]
     if force == "1":
         color_system = "standard"
     elif force == "0" or os.environ.get("NO_COLOR") is not None:

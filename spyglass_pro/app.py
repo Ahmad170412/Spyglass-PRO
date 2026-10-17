@@ -154,7 +154,15 @@ def _gate_api():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    """Render the dashboard.
+
+    ``version`` and ``keys_total`` come from the server so the markup can
+    never drift from ``version.py`` / ``_SETTINGS_SPEC`` — the JS only
+    *updates* these two values after ``/api/status`` and ``/api/settings``
+    resolve, and the first paint shows the truth.
+    """
+    return render_template("index.html", version=__version__,
+                           keys_total=len(_SETTINGS_SPEC))
 
 
 @app.route("/api/status")
@@ -230,6 +238,20 @@ def _module_imports(name):
         return False
 
 
+# Recon legs each query type cannot run without, beyond its keyless core:
+# *everything else that module does still runs*. Mirrored by the UI's
+# per-module data-source grid (``app.js`` ``TOOL_ROWS``) — pinned by
+# tests/test_ui_contract.py, so the two tables cannot drift apart.
+_TOOLS_LEGS = {
+    "email": ["holehe", "user-scanner", "blackbird"],
+    "username": ["user-scanner", "sherlock", "maigret", "blackbird"],
+    "phone": ["ignorant", "phoneinfoga"],
+    "website": ["dig", "whois", "curl"],
+    "ip": ["shodan"],
+    "metadata": ["exiftool"],
+}
+
+
 def _degraded(tools):
     """Which recon legs each query type cannot run right now.
 
@@ -237,14 +259,7 @@ def _degraded(tools):
     returns the rest — so the UI has to say so, or a partial result reads
     as a complete one.
     """
-    legs = {
-        "email": ["holehe", "user-scanner", "blackbird"],
-        "username": ["user-scanner", "sherlock", "maigret", "blackbird"],
-        "phone": ["ignorant", "phoneinfoga"],
-        "website": ["dig", "whois", "curl"],
-        "ip": ["shodan"],
-        "metadata": ["exiftool"],
-    }
+    legs = _TOOLS_LEGS
     return {qtype: [tool for tool in needed if not tools.get(tool)]
             for qtype, needed in legs.items()
             if any(not tools.get(tool) for tool in needed)}

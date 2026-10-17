@@ -797,8 +797,7 @@ function renderBody(data, qtype) {
   return renderGeneric(data);
 }
 
-/* ── Social (registry-driven, one layout for every platform) ── */
-/* Mirror of PROFILE_FIELDS in spyglass_pro/social/schema.py — the field
+/* ── Social (registry-driven, one layout for every platform) ── *//* Mirror of PROFILE_FIELDS in spyglass_pro/social/schema.py — the field
    metadata lives in Python and this is its renderer-side copy. Keep the
    two in step: tests/test_social.py parses this block and fails if it
    drifts from the Python tuple (key order, label and type). */
@@ -947,15 +946,28 @@ function renderSocial(d) {
 var pendingSocialPlatform = null;
 var SOCIAL_LABELS = {};
 var SOCIAL_META = {};
+/* Pre-registry display labels, for the moment between a click and the
+   registry fetch resolving. Derived labels (capitalize(key)) read wrong
+   for GitHub; this map only ever paints a name, never gates behaviour. */
+var SOCIAL_FALLBACK_LABELS = {
+  instagram: 'Instagram', mastodon: 'Mastodon', bluesky: 'Bluesky', github: 'GitHub'
+};
+
+function socialLabel(key) {
+  return SOCIAL_LABELS[key] || SOCIAL_FALLBACK_LABELS[key] || key;
+}
 
 function selectSocialPlatform(key) {
   var sel = document.getElementById('socialPlatform');
   if (!sel) { pendingSocialPlatform = key; return; }
-  if (!SOCIAL_LABELS[key]) { pendingSocialPlatform = key; return; }
-  pendingSocialPlatform = null;
+  /* The click wins immediately, registry answered or not: the hidden
+     field is what submit reads, so deferring it until the list arrives
+     let a fast click run the *previous* platform silently. An unknown
+     platform submits too — the server names the gap, honestly. */
   sel.value = key;
+  pendingSocialPlatform = null;
   var name = document.getElementById('socialPlatformName');
-  if (name) name.textContent = SOCIAL_LABELS[key];
+  if (name) name.textContent = socialLabel(key);
   setSocialPlaceholder(key);
   updateSocialCaps(null);
 }
@@ -966,7 +978,8 @@ function setSocialPlaceholder(key) {
   var hints = {
     instagram: 'instagram username',
     mastodon: 'user or user@instance',
-    bluesky: 'user.bsky.social'
+    bluesky: 'user.bsky.social',
+    github: 'github username or org'
   };
   input.placeholder = hints[key] || 'handle';
 }
@@ -990,19 +1003,25 @@ function loadSocialPlatforms() {
         SOCIAL_LABELS[p.key] = p.label || p.key;
         SOCIAL_META[p.key] = { browser: p.browser !== false, login: p.login || 'none' };
       });
-      /* Default to the first tab's platform unless a tab was already
-         clicked while the registry was in flight. */
+      /* The operator's explicit choice wins over any default. When the
+         registry does not know that platform (an older server process
+         behind this UI, or a broken adapter), the form stays on the
+         requested platform and showCaps names the mismatch — falling
+         back to another platform's form silently is how Instagram's
+         config ends up under a GitHub tab. */
       var want = pendingSocialPlatform || sel.value || 'instagram';
       pendingSocialPlatform = null;
-      if (!SOCIAL_LABELS[want]) want = list[0].key;
       sel.value = want;
       var name = document.getElementById('socialPlatformName');
-      if (name) name.textContent = SOCIAL_LABELS[want];
+      if (name) name.textContent = socialLabel(want);
       setSocialPlaceholder(want);
       showCaps(list, want);
     })
     .catch(function () {
-      sel.value = '';
+      /* A failed registry fetch must not blank the operator's explicit
+         choice — the form stays on the selected platform and the caps
+         line names why there is no capability header. */
+      if (caps) caps.textContent = 'Could not reach the platform registry — capabilities unknown; your selection stays. Check the server, then reload.';
     });
 }
 
@@ -1022,19 +1041,27 @@ function showCaps(platforms, key) {
   if (!caps) return;
   var match = (platforms || []).filter(function (p) { return p.key === key; })[0];
   var keyless = !!match && match.browser === false;
-  /* Burner login only exists on browser platforms that declare it —
-     keyless adapters (Mastodon, Bluesky) have no login row to show. */
   var burnerRow = document.getElementById('burnerRow');
   if (burnerRow) burnerRow.style.display = (match && match.login && match.login !== 'none') ? '' : 'none';
-  /* Headless / Deep / Download Media drive the stealth browser, which
-     keyless adapters never launch — offering them there implies stories
-     and media downloads that do not exist on those tabs. */
   var form = document.getElementById('form-social');
   var browserOpts = form ? form.querySelectorAll('[data-browser-only]') : [];
+  /* Headless / Deep / Download Media drive the stealth browser, which
+     keyless adapters never launch — offering them there implies stories
+     and media downloads that do not exist on those tabs. An unknown
+     platform hides them too: we cannot claim what it needs, and a
+     generic form is safer than one tuned for a different platform. */
   for (var i = 0; i < browserOpts.length; i++) {
-    browserOpts[i].style.display = keyless ? 'none' : '';
+    browserOpts[i].style.display = (match && !keyless) ? '' : 'none';
   }
-  if (!match) { caps.textContent = ''; return; }
+  if (!match) {
+    /* A tab this server's registry does not know: say so. An older
+       process since an upgrade or a disabled adapter must be readable
+       from the panel, not distinguishable from a working tab. */
+    caps.textContent = "'" + key + "' is not in this server's registry " +
+      "(older process since an upgrade, or a broken adapter) — restart " +
+      "the server so every bundled adapter registers.";
+    return;
+  }
   caps.textContent = 'Can return: ' + match.capabilities.join(', ') +
     (match.login === 'none' ? (match.browser === false ? ' · keyless, no browser needed' : ' · no burner login') : ' · burner login supported');
 }
@@ -1605,7 +1632,7 @@ function updateOverview(status) {
   apiFetch('/api/settings').then(function (r) { return r.json(); }).then(function (data) {
     SETTINGS_CACHE = data || SETTINGS_CACHE;
     var k = document.getElementById('statKeys');
-    if (k && data) k.textContent = (data.configured || 0) + '/' + (data.total || 9);
+    if (k && data) k.textContent = (data.configured || 0) + '/' + (data.total || 0);
     renderToolGrid();
   }).catch(function () {});
 }
@@ -1690,7 +1717,7 @@ function loadSettings() {
         ' keys configured — blank fields are left untouched</span>';
     }
     var k = document.getElementById('statKeys');
-    if (k && data) k.textContent = (data.configured || 0) + '/' + (data.total || 9);
+    if (k && data) k.textContent = (data.configured || 0) + '/' + (data.total || 0);
   }).catch(function () {
     if (status) status.innerHTML = '<span class="dot error"></span><span>Could not load vault.</span>';
   });

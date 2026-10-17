@@ -70,8 +70,8 @@ def normalize(profile: dict, result: dict) -> None:
         avatar_url=profile.get("avatar"),
     )
 
-    labels = [label.get("val") for label in (profile.get("labels") or [])
-              if isinstance(label, dict) and label.get("val")]
+    labels = [val for label in (profile.get("labels") or [])
+              if isinstance(label, dict) and (val := label.get("val"))]
     if labels:
         add_note(result, "moderation labels: " + ", ".join(labels))
     if profile.get("associated", {}).get("labeler"):

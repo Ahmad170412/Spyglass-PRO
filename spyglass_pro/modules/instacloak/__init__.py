@@ -24,4 +24,4 @@ Package layout (keep each module single-purpose):
 Run from the repo root:  python3 main.py  (thin wrapper) or  python3 -m instacloak
 """
 
-__version__ = "1.0.0"  # keep in sync with pyproject.toml
+__version__ = "1.1.0"  # distribution version; vendored from InstaCloak @ 9028d15 — see NOTICE

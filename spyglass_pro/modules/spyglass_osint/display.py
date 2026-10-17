@@ -17,7 +17,7 @@ try:
         return Style(color=fg, bold=bold, dim=dim)
 except ImportError:
     _RICH = False
-    _con = None
+    _con = None  # type: ignore[assignment]  # rich absent; every _con call is behind _RICH
 
     def _style(*, fg=None, bold=False, dim=False):
         class _Null:

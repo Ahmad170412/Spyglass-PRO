@@ -214,14 +214,16 @@ console.log('== keyless tabs hide browser options ==');
   const labels = [{ style: {} }, { style: {} }, { style: {} }];
   const form = { querySelectorAll: (sel) => (sel === '[data-browser-only]' ? labels : []) };
   const burnerRow = { style: {} };
+  const caps = { textContent: '' };
   sandbox.document.getElementById = (id) => (
     id === 'form-social' ? form : id === 'burnerRow' ? burnerRow
-    : id === 'socialCaps' ? { textContent: '' } : null);
+    : id === 'socialCaps' ? caps : null);
   try {
     const list = [
       { key: 'instagram', label: 'Instagram', login: 'instacloak', browser: true, capabilities: [] },
       { key: 'mastodon', label: 'Mastodon', login: 'none', browser: false, capabilities: [] },
       { key: 'bluesky', label: 'Bluesky', login: 'none', browser: false, capabilities: [] },
+      { key: 'github', label: 'GitHub', login: 'none', browser: false, capabilities: [] },
     ];
     sandbox.showCaps(list, 'mastodon');
     check('keyless tab hides headless/deep/media',
@@ -231,6 +233,15 @@ console.log('== keyless tabs hide browser options ==');
       labels.every((l) => l.style.display === ''), JSON.stringify(labels.map((l) => l.style.display)));
     sandbox.showCaps(list, 'bluesky');
     check('keyless tab hides the burner row', burnerRow.style.display === 'none', burnerRow.style.display);
+    sandbox.showCaps(list, 'github');
+    check('new keyless tab behaves like the others',
+      burnerRow.style.display === 'none'
+      && labels.every((l) => l.style.display === 'none'), burnerRow.style.display);
+    sandbox.showCaps(list, 'no-such-platform');
+    check('platform unknown to the server names the gap and hides browser options',
+      caps.textContent.includes('not in this server') && labels.every((l) => l.style.display === 'none'),
+      caps.textContent);
+    check('the gap message is a reason, not a blank', caps.textContent.length > 40, caps.textContent);
   } finally {
     sandbox.document.getElementById = realGet;
   }
@@ -253,9 +264,37 @@ console.log('== keyless tabs hide browser options ==');
     check('tab sets the hidden field', fields.socialPlatform.value === 'mastodon', fields.socialPlatform.value);
     check('tab updates the name line', fields.socialPlatformName.textContent === 'Mastodon', fields.socialPlatformName.textContent);
     check('tab rewrites the placeholder', fields.socialHandle.placeholder.includes('instance'), fields.socialHandle.placeholder);
-    sandbox.selectSocialPlatform('nope');
-    check('unknown platform keeps the current tab instead of blanking it',
-      fields.socialPlatform.value === 'mastodon', fields.socialPlatform.value);
+    sandbox.selectSocialPlatform('github');
+    check('a click on a platform the registry has not answered for still wins the form',
+      fields.socialPlatform.value === 'github'
+      && fields.socialPlatformName.textContent === 'GitHub'
+      && fields.socialHandle.placeholder.includes('github'),
+      fields.socialPlatform.value + ' / ' + fields.socialPlatformName.textContent);
+  } finally {
+    sandbox.document.getElementById = realGet;
+    sandbox.fetch = realFetch;
+  }
+})();
+const registryFetchTest = (async function () {
+  /* A dead registry fetch must keep the operator's platform and explain
+   * itself — drive loadSocialPlatforms' catch branch directly. */
+  const realGet = sandbox.document.getElementById;
+  const fields = {
+    socialPlatform: { value: 'github' },
+    socialCaps: { textContent: '' },
+  };
+  sandbox.document.getElementById = (id) => fields[id] || null;
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = () => Promise.reject(new Error('no network in tests'));
+  try {
+    sandbox.loadSocialPlatforms();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    check('a failed registry fetch explains itself with a next step',
+      fields.socialCaps.textContent.includes('Could not reach the platform registry')
+      && fields.socialCaps.textContent.includes('reload'),
+      fields.socialCaps.textContent);
+    check('a failed registry fetch keeps the operator choice',
+      fields.socialPlatform.value === 'github', fields.socialPlatform.value);
   } finally {
     sandbox.document.getElementById = realGet;
     sandbox.fetch = realFetch;
@@ -364,5 +403,9 @@ check('lens microseconds trimmed',
 check('spyglass stamps untouched', sandbox.fmtRunAt('2026-10-03T15:52:04') === '2026-10-03T15:52:04');
 check('missing stamp is blank', sandbox.fmtRunAt(null) === '');
 
-console.log(`\n${'='.repeat(40)}\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+/* The registry-failure test above is asynchronous; let its checks land
+ * before the tally prints, so the summary matches what actually ran. */
+Promise.resolve(registryFetchTest).then(function () {
+  console.log(`\n${'='.repeat(40)}\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+});

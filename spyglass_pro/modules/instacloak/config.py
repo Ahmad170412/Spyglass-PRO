@@ -62,7 +62,8 @@ def load_config(path: str | None) -> dict:
         # OPSEC: config.toml can hold burner credentials / proxy user:pass --
         # warn if it is readable by other users on this machine.
         if os.name == "posix":
-            file_has_creds = bool(cfg["login_password"]) or "@" in cfg["proxy_url"]
+            file_has_creds = (bool(cfg["login_password"])
+                              or "@" in str(cfg["proxy_url"] or ""))
             if file_has_creds:
                 try:
                     mode = os.stat(found).st_mode & 0o777

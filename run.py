@@ -2,14 +2,14 @@
 """Spyglass-Pro — Flask GUI entry point."""
 
 import os
-import site
 import sys
+import sysconfig
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
-def _augment_path() -> None:
-    """Put the CLI-engine install locations on PATH.
+def _path_candidates():
+    """The install locations the engine's tool probes should see.
 
     Two separate sets of tools feed the identity modules:
 
@@ -21,6 +21,10 @@ def _augment_path() -> None:
       interactive login shell. A server started from a process without a
       login shell (a launch agent, cron, Docker CMD) silently loses them and
       the email/username modules degrade to breach-only.
+    * ``pip install --user`` CLIs land in the user-scheme scripts dir:
+      ``~/.local/bin`` on POSIX, ``%APPDATA%\\Python\\<ver>\\Scripts`` on
+      Windows — hardcoding the POSIX shape once made these invisible on
+      Windows, so the dir comes from sysconfig, which knows every scheme.
 
     Tool paths are resolved once at import here, so this has to run before
     ``spyglass_pro.utils`` is imported by anything.
@@ -40,12 +44,17 @@ def _augment_path() -> None:
     # it under a handful of fixed locations, so put its parent on PATH too.
     candidates.append(os.path.join(home, ".local", "bin", "blackbird"))
 
+    # The per-OS user scripts dir. If sysconfig cannot describe this
+    # platform (unusual embedders), skip rather than guess.
     try:
-        user_base = site.getuserbase()
-        candidates.append(os.path.join(user_base, "bin"))
+        candidates.append(sysconfig.get_path("scripts", f"{os.name}_user"))
     except Exception:
-        pass
+        candidates.append("")
+    return candidates
 
+
+def _augment_path() -> None:
+    candidates = _path_candidates()
     current = os.environ.get("PATH", "").split(os.pathsep)
     for candidate in candidates:
         if candidate and os.path.isdir(candidate) and candidate not in current:

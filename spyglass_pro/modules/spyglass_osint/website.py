@@ -44,6 +44,7 @@ import socket
 import subprocess
 import urllib.parse
 import urllib.request
+from typing import Any
 
 from . import utils
 from .utils import (
@@ -69,8 +70,8 @@ UA = (
 # into the next. Dig/HTTP lookups are cheap to repeat but the same query often
 # runs several times in one pass (e.g. host "A" for both the IP set and the
 # DNS table), so cache them for the duration of the run.
-_DIG_CACHE = {}
-_BODY_CACHE = {}
+_DIG_CACHE: dict[str, Any] = {}
+_BODY_CACHE: dict[str, Any] = {}
 
 
 def _reset_caches():

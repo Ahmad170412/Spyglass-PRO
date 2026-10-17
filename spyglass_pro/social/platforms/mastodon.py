@@ -188,7 +188,7 @@ def collect(page, cfg, handle: str, result: dict) -> None:
                 # report it, don't silently swap identities.
                 add_note(result, f"resolver returned @{account.get('acct')} for @{query}")
             normalize(account, result)
-            home = _host_of(account.get("url")) or RESOLVERS[0]
+            home = _host_of(account.get("url") or "") or RESOLVERS[0]
             if not _valid_host(home):
                 # A hostile or broken instance answered lookup with an
                 # account URL pointing somewhere httpx must not go —

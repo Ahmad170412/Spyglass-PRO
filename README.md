@@ -13,7 +13,7 @@
 [![Passive only](https://img.shields.io/badge/recon-passive--only-6366f1?logo=shield&logoColor=white)](#passive-only)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[**Quick Start**](#quick-start) · [**Features**](#features) · [**Architecture**](#architecture) · [**Configuration**](#configuration) · [**API**](#api) · [**Contributing**](CONTRIBUTING.md) · [**Security**](.github/SECURITY.md) · [**Audit**](AUDIT-2026-10.md)
+[**Quick Start**](#quick-start) · [**Features**](#features) · [**Architecture**](#architecture) · [**Configuration**](#configuration) · [**API**](#api) · [**Changes**](CHANGELOG.md) · [**Contributing**](CONTRIBUTING.md) · [**Security**](.github/SECURITY.md) · [**Audit**](AUDIT-2026-10.md)
 
 </div>
 
@@ -63,6 +63,7 @@ a target, and how do I know the answer is real?**
 - [Platforms](#platforms)
 - [Project structure](#project-structure)
 - [Contributing](#contributing)
+- [Changelog](CHANGELOG.md)
 - [Responsible use](#responsible-use)
 - [License](#license)
 
@@ -89,7 +90,8 @@ python run.py
 
 Open <http://127.0.0.1:5000>.
 
-That's it — **Website**, **IP Address** and **Full Investigation** work
+That's it — **Website**, **IP Address**, **Full Investigation** and the
+keyless social panels (**GitHub**, **Mastodon**, **Bluesky**) work
 immediately on a bare install. To light up the email/username/phone panels:
 
 ```bash
@@ -116,7 +118,7 @@ launch agent instead of a login shell.
 | **Investigation** | Runs every engine in parallel and correlates shared emails, IPs, domains and usernames |
 | **OPSEC** | Local self-check: your real IP, proxy status, DNS-leak exposure, timezone/geo fingerprint risk |
 | **Metadata** | ExifTool + PDF/OOXML/image fallbacks, MD5/SHA-256, GPS, with file-type reconciliation |
-| **Social** | Instagram (stealth browser) + Mastodon and Bluesky (keyless, instant), one registry-driven panel |
+| **Social** | Instagram (stealth browser) + Mastodon, Bluesky and GitHub (keyless, instant), one registry-driven panel |
 | **Cases** | Encrypted-at-rest run history with entity diffing, timelines and dossier export |
 
 ---
@@ -166,7 +168,7 @@ spyglass-pro                  # console entry point
 ```
 
 <details>
-<summary><b>Social recon needs one more package</b></summary>
+<summary><b>Social recon needs one more package — for Instagram only</b></summary>
 
 The Instagram panel drives a real browser via `cloakbrowser`, which is
 deliberately **not** a core dependency — it pulls a ~200 MB browser binary and
@@ -176,7 +178,8 @@ wants a license key:
 pip install cloakbrowser
 ```
 
-Every other panel works without it.
+GitHub, Mastodon and Bluesky are keyless JSON sources: they need no browser,
+no account and no key, and work on a bare install.
 
 </details>
 
@@ -346,13 +349,15 @@ report artifacts from a scan land in the working directory of the run.
 .venv/bin/python tests/run_tests.py
 ```
 
-**443 offline checks** — the three engines' own suites plus the merge layer
+**481 offline checks** — the three engines' own suites plus the merge layer
 (API surface, auth gate, proxy validation, job pool, target validation, case
-queries, cross-platform filename and decoding behaviour). No network, no
-browser, finishes in about a second.
+queries, cross-platform filename and decoding behaviour) and the node-checked
+dashboard JS. No network, no browser, finishes in a few seconds.
 
-CI runs the suite on Python 3.10–3.13 (plus macOS), lints with `ruff`, and asserts the built
-wheel actually carries `LICENSE`, `NOTICE` and all three vendored engines.
+CI runs the suite on Python 3.10–3.13 (plus macOS and Windows), type-checks
+with `mypy`, lints with `ruff`, `node --check`s the dashboard JS, and asserts
+the built wheel actually carries `LICENSE`, `NOTICE` and all three vendored
+engines.
 
 ---
 
@@ -378,7 +383,7 @@ a bug:
 ```
 run.py                     dev entry point
 scripts/install_tools.py   idempotent CLI-engine installer
-tests/                     443 offline checks (run_tests.py)
+tests/                     481 offline checks (run_tests.py)
 assets/logo.svg            README logo
 spyglass_pro/
   app.py                   Flask routes + auth gate + proxy validation

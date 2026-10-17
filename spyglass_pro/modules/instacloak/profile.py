@@ -86,10 +86,12 @@ def _external_link(node: dict) -> str | None:
     return None
 
 
-def _hd_propic_url(url: str | None) -> str | None:
-    """Try to upgrade the profile pic CDN URL to the highest size."""
-    if not url:
-        return url
+def _hd_propic_url(url: str) -> str:
+    """Try to upgrade the profile pic CDN URL to the highest size.
+
+    Callers pass a string (``profile.get("profile_pic_url") or ""``), so
+    the '' in, '' out case is re.sub's no-op rather than a None passthrough
+    — download_media's ``url: str`` parameter is honest about that."""
     return re.sub(r"s\d+x\d+", "s640x640", url)
 
 
@@ -152,9 +154,9 @@ def profile_from_dom_text(text: str, verified: bool, username: str) -> dict:
                     full_name = cand
             break
     if full_name is None:  # single-line / pipe-separated fallback
-        m = re.search(rf"(?:^|\| ){re.escape(username)} \| ([^|]{{1,80}})", flat, re.I)
-        if m:
-            cand = m.group(1).strip()
+        pipe_m = re.search(rf"(?:^|\| ){re.escape(username)} \| ([^|]{{1,80}})", flat, re.I)
+        if pipe_m:
+            cand = pipe_m.group(1).strip()
             if cand and not _DOM_COUNT_RE.match(cand):
                 full_name = cand
 

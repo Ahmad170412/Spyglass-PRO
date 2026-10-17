@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spyglass-pro"
-version = "1.0.0"
+version = "1.1.0"
 description = "Spyglass-Pro — unified OSINT superpower wiring Spyglass-OSINT, InstaCloak, and Lens-Extender into one platform"
 readme = "README.md"
 # PEP 639: a single SPDX expression plus explicit license files, in place of

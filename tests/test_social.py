@@ -92,11 +92,11 @@ class FrontendSchemaMirrorTest(unittest.TestCase):
 class RegistryTest(unittest.TestCase):
     def test_bundled_platforms_register(self):
         keys = [platform["key"] for platform in registry.describe()]
-        for expected in ("instagram", "mastodon", "bluesky"):
+        for expected in ("instagram", "mastodon", "bluesky", "github"):
             self.assertIn(expected, keys)
 
     def test_keyless_platforms_need_no_browser_or_login(self):
-        for key in ("mastodon", "bluesky"):
+        for key in ("mastodon", "bluesky", "github"):
             platform = registry.get(key)
             self.assertEqual(platform.login, "none")
             self.assertFalse(platform.browser)
@@ -395,6 +395,202 @@ class BlueskyNormalizeTest(unittest.TestCase):
                          "https://bsky.app/profile/example.bsky.social/post/rkey1")
         self.assertEqual(post["caption"], "hi there")
         self.assertEqual(post["likes"], 8)
+
+
+GITHUB_PROFILE = {
+    "login": "octocat",
+    "name": "The Octocat",
+    "bio": "GitHub mascot",
+    "html_url": "https://github.com/octocat",
+    "blog": "octocat.github.io",
+    "location": "San Francisco",
+    "email": "octocat@example.com",
+    "twitter_username": "octocat",
+    "followers": 9000,
+    "following": 9,
+    "public_repos": 8,
+    "created_at": "2011-01-25T18:44:36Z",
+    "avatar_url": "https://avatars.githubusercontent.com/u/583231",
+    "type": "User",
+}
+
+GITHUB_REPOS = [
+    {"id": 1296269, "name": "Hello-World", "full_name": "octocat/Hello-World",
+     "description": "My first repository",
+     "html_url": "https://github.com/octocat/Hello-World",
+     "stargazers_count": 1801, "forks_count": 1500,
+     "pushed_at": "2013-01-23T14:27:08Z"},
+    {"id": 1296270, "name": "Spoon-Knife", "full_name": "octocat/Spoon-Knife",
+     "description": None,
+     "html_url": "https://github.com/octocat/Spoon-Knife",
+     "stargazers_count": 11150, "forks_count": 126731,
+     "pushed_at": "2022-10-07T08:15:01Z"},
+]
+
+
+class GitHubLoginValidationTest(unittest.TestCase):
+    """Logins validated locally *before* any request: a malformed target
+    fails cheaply and unambiguously instead of generating a 404 that reads
+    as a real "no such user" — and without spending any of the sixty
+    requests an hour the keyless API allows."""
+
+    def _collect(self, handle):
+        from unittest import mock
+
+        from spyglass_pro.social.platforms import github
+
+        result = schema.new_result("github", handle)
+        with mock.patch.object(github.httpx, "Client") as client:
+            github.collect(None, {}, handle, result)
+        client.assert_not_called()  # validation must predate every request
+        return result
+
+    def test_valid_logins_pass_the_regex(self):
+        from spyglass_pro.social.platforms import github
+        for login in ("a", "octocat", "The-Octocat-2", "a" * 39):
+            self.assertTrue(github._LOGIN_RE.fullmatch(login), login)
+
+    def test_invalid_logins_never_reach_the_network(self):
+        for login in ("-octocat", "octocat-", "octo--cat", "octo cat",
+                      "user@example.com", "", "a" * 40, "octo+c/evil"):
+            self.assertFalse(self._collect(login)["found"])
+        error = self._collect("user@example.com")["error"]
+        self.assertIn("not a valid GitHub login", error)
+
+
+class GitHubNormalizeTest(unittest.TestCase):
+    def _result(self, profile=None):
+        from spyglass_pro.social.platforms import github
+
+        result = schema.new_result("github", "octocat")
+        github.normalize(profile if profile is not None else GITHUB_PROFILE, result)
+        return result
+
+    def test_maps_profile_fields(self):
+        result = self._result()
+        self.assertTrue(result["found"])
+        self.assertEqual(result["display_name"], "The Octocat")
+        self.assertEqual(result["url"], "https://github.com/octocat")
+        self.assertEqual(result["follower_count"], 9000)
+        self.assertEqual(result["following_count"], 9)
+        self.assertEqual(result["post_count"], 8)
+        self.assertEqual(result["joined"], "2011-01-25T18:44:36Z")
+        self.assertEqual(result["contact_email"], "octocat@example.com")
+
+    def test_bare_blog_domain_gets_a_scheme(self):
+        """The blog field accepts anything; the renderer's link fields are
+        scheme-allowlisted, so a bare domain is greedily https'd rather
+        than silently dropped from the table at render time."""
+        result = self._result()
+        self.assertEqual(result["website"], "https://octocat.github.io")
+
+    def test_external_links_cover_blog_and_twitter(self):
+        result = self._result()
+        self.assertEqual(result["external_links"],
+                         ["https://octocat.github.io", "https://x.com/octocat"])
+
+    def test_lists_are_walls_not_empty_lists(self):
+        result = self._result()
+        self.assertIn("followers", result["walls"])
+        self.assertIn("following", result["walls"])
+
+    def test_organization_is_noted_not_fabricated(self):
+        profile = dict(GITHUB_PROFILE, type="Organization")
+        notes = self._result(profile)["notes"]
+        self.assertTrue(any("organization account" in n for n in notes))
+
+    def test_missing_profile_is_not_found(self):
+        self.assertFalse(self._result({})["found"])
+
+    def test_repos_map_to_posts(self):
+        from spyglass_pro.social.platforms import github
+
+        result = self._result()
+        github.normalize_repos(GITHUB_REPOS, result)
+        (first, second) = result["posts"]
+        self.assertEqual(first["url"], "https://github.com/octocat/Hello-World")
+        self.assertEqual(first["caption"], "My first repository")
+        self.assertEqual(first["likes"], 1801)      # stars
+        self.assertEqual(first["comments"], 1500)   # forks
+        self.assertEqual(first["timestamp"], "2013-01-23T14:27:08Z")
+        # No description falls back to the repo name — never an empty caption.
+        self.assertEqual(second["caption"], "Spoon-Knife")
+
+
+class GitHubCollectTest(unittest.TestCase):
+    """The networked paths, driven offline through mocked _get calls."""
+
+    def _run(self, side_effects, handle="octocat"):
+        from unittest import mock
+
+        from spyglass_pro.social.platforms import github
+
+        result = schema.new_result("github", handle)
+        with mock.patch.object(github, "_get", side_effect=side_effects):
+            github.collect(None, {}, handle, result)
+        return result
+
+    def test_success_maps_profile_and_repos(self):
+        result = self._run([
+            (200, dict(GITHUB_PROFILE), {"x-ratelimit-remaining": "58"}),
+            (200, GITHUB_REPOS, {"x-ratelimit-remaining": "57"}),
+        ])
+        self.assertTrue(result["found"])
+        self.assertEqual(result["source"], "api.github.com (keyless)")
+        self.assertEqual(len(result["posts"]), 2)
+
+    def test_budget_note_is_on_the_result(self):
+        """Sixty an hour per IP is a real limit — the remaining budget must
+        be readable from the result, not witnessed by surprise 403s."""
+        result = self._run([
+            (200, dict(GITHUB_PROFILE), {"x-ratelimit-remaining": "58"}),
+            (200, GITHUB_REPOS, {"x-ratelimit-remaining": "57"}),
+        ])
+        self.assertTrue(any("58/60" in note for note in result["notes"]))
+
+    def test_missing_account_is_a_clear_error(self):
+        result = self._run([(404, None, {"x-ratelimit-remaining": "59"})])
+        self.assertFalse(result["found"])
+        self.assertEqual(result["error"], "no GitHub account found for @octocat")
+
+    def test_exhausted_budget_is_named_not_dropped(self):
+        """A 403 on a dry budget must not read as 'no such user'."""
+        result = self._run([
+            (403, None, {"x-ratelimit-remaining": "0"}),
+        ])
+        self.assertFalse(result["found"])
+        self.assertIn("budget exhausted", result["error"])
+        self.assertIn("GITHUB_TOKEN", result["error"])
+
+    def test_403_with_budget_left_names_the_secondary_limit(self):
+        """A 403 while the headers still show requests left is NOT the hourly
+        budget — without its own message it would tell the operator to mint
+        a token they do not need."""
+        result = self._run([
+            (403, None, {"x-ratelimit-remaining": "59"}),
+        ])
+        self.assertFalse(result["found"])
+        self.assertIn("secondary rate limit", result["error"])
+        self.assertNotIn("GITHUB_TOKEN", result["error"])
+
+    def test_renamed_account_is_reported_not_swapped(self):
+        renamed = dict(GITHUB_PROFILE, login="octocat2")
+        result = self._run([
+            (200, renamed, {}),
+            (200, [], {}),
+        ])
+        self.assertTrue(result["found"])
+        self.assertTrue(any("renamed" in n for n in result["notes"]))
+
+    def test_failing_repos_leg_never_hides_the_profile(self):
+        """A partial result is honest: profile data stands, the missing
+        repos leg is named."""
+        result = self._run([
+            (200, dict(GITHUB_PROFILE), {"x-ratelimit-remaining": "58"}),
+            (500, None, {}),
+        ])
+        self.assertTrue(result["found"])
+        self.assertTrue(any("repos endpoint failed" in n for n in result["notes"]))
 
 
 INSTAGRAM_REPORT = {

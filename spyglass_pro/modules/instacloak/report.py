@@ -375,8 +375,9 @@ def print_summary(report: dict) -> None:
             if exposed is not None:
                 parts.append(f"contact: {'yes' if exposed else 'no'}{_contact_channels(p)}")
             say("  business    : " + "  |  ".join(parts))
-        if p.get("biography"):
-            say(f"  bio         : {p.get('biography')[:90]}")
+        biography = p.get("biography")
+        if biography:
+            say(f"  bio         : {biography[:90]}")
         hl = p.get("highlights") or []
         if hl:
             titles = ", ".join(h["title"][:22] for h in hl[:4])

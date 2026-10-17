@@ -61,6 +61,38 @@ jobs:
       - name: Test suite (offline, no browser)
         run: python tests/run_tests.py
 
+  test-windows:
+    name: test (windows, py3.12)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --upgrade pip
+      - run: pip install -r requirements.txt
+      - name: Test suite (offline, no browser)
+        # Windows is a supported OS in pyproject and gets its own fallbacks
+        # (no dig/whois, reserved filenames) — it must be exercised, not
+        # documented. The suite is offline and hermetic, so this only costs
+        # a runner minute.
+        run: python tests/run_tests.py
+
+  types:
+    name: mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      # Type errors in the vendored engines and the merge layer are real
+      # bugs waiting for an upstream sync; mypy was a dev extra nobody
+      # ran, so it lives here now (config in pyproject.toml).
+      - run: mypy spyglass_pro
+
   package:
     name: build
     runs-on: ubuntu-latest

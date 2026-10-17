@@ -1,14 +1,14 @@
 """Tests for scripts/install_tools.py — the optional-engine installer.
 
-Two contracts matter here. First, detection must mirror the application:
-"present" in --check has to mean the same thing it means to the engines,
-or the script and the dashboard disagree about what's installed. Second,
-every tool the dashboard can detect must be installable through this
-script (or carry an honest manual pointer) — a "install what's missing"
-script with gaps strands a fresh clone on a degraded install.
+Two contracts matter here. First, detection must not merely mirror the
+application — it must *be* the application's detection (the same list,
+imported) — or the script and the dashboard end up disagreeing about
+what's installed. Second, every tool the dashboard can detect must be
+installable through this script (or carry an honest manual pointer) — a
+"install what's missing" script with gaps strands a fresh clone on a
+degraded install.
 """
 
-import os
 import sys
 import unittest
 from pathlib import Path
@@ -24,32 +24,17 @@ import install_tools
 
 
 class DetectionMirrorTest(unittest.TestCase):
-    def test_fallbacks_cover_every_utils_location(self):
-        """utils.py scans six blackbird locations; the script must too."""
-        import re
-
-        utils = (Path(__file__).resolve().parents[1] / "spyglass_pro"
-                 / "modules" / "spyglass_osint" / "utils.py").read_text()
-        block = utils.split("_BLACKBIRD_PATHS = (", 1)[1].split(")", 1)[0]
-        home = os.path.expanduser("~")
-
-        locations = set(re.findall(r'"(/[^"]+)"', block))
-        for join in re.findall(
-                r'os\.path\.join\(_home((?:,\s*"[^"]*")*)\)', block):
-            parts = re.findall(r'"([^"]*)"', join)
-            locations.add(os.path.join(home, *parts))
-        self.assertTrue(locations, "could not parse utils.py fallbacks")
-
-        mirrored = set()
-        for directory in install_tools._BLACKBIRD_FALLBACKS:
-            directory = directory.replace("~", home)
-            if directory.endswith(".py"):
-                mirrored.add(directory)
-            else:
-                mirrored.add(os.path.join(directory, "blackbird.py"))
-        for location in locations:
-            self.assertIn(location, mirrored,
-                          f"utils location uncovered: {location}")
+    def test_imports_the_engine_constant_itself(self):
+        """No forked copy: the installer must scan the *very list object*
+        the engine scans (import identity), so an edit to either side can
+        never drift apart — the exact bug class the old hand-synced
+        fallback tuple had. Also pins that the list stays substantive."""
+        from spyglass_osint import utils as sg_utils
+        self.assertIs(install_tools._BLACKBIRD_PATHS, sg_utils._BLACKBIRD_PATHS)
+        self.assertGreaterEqual(len(install_tools._BLACKBIRD_PATHS), 5)
+        for path in install_tools._BLACKBIRD_PATHS:
+            self.assertTrue(path.endswith("blackbird.py"),
+                            f"unexpected candidate shape: {path}")
 
     def test_pipx_message_names_a_real_installer(self):
         """'Install pipx with pipx' sends the user in a circle."""
@@ -120,6 +105,88 @@ class CoverageTest(unittest.TestCase):
             code = install_tools.main(["--check", "--only", "sherlock"])
         self.assertEqual(code, 1)
         run.assert_not_called()
+
+
+class WindowsInstallerTest(unittest.TestCase):
+    """The Windows branches, driven offline by pinning os.name and the
+    package-manager availability. The winget/choco IDs are real manifests
+    in the winget-pkgs / community registries (verified 2026-10); a wrong
+    ID installs nothing and reports success only of failure."""
+
+    def _as_nt(self, managers):
+        """Patch os.name to 'nt' and shutil.which to the manager table."""
+        nt = mock.patch.object(install_tools.os, "name", "nt")
+        return nt, mock.patch.object(install_tools.shutil, "which", managers.get)
+
+    def test_exiftool_goes_through_winget_first(self):
+        nt, mgr = self._as_nt({"winget": "/wt", "choco": "/ch"})
+        with nt, mgr, \
+             mock.patch.object(install_tools, "_winget_install",
+                               return_value=(True, "winget ok")) as winget, \
+             mock.patch.object(install_tools, "_choco_install") as choco:
+            ok, _detail = install_tools.install_exiftool()
+        self.assertTrue(ok)
+        winget.assert_called_once_with("OliverBetz.ExifTool")
+        choco.assert_not_called()
+
+    def test_exiftool_falls_back_to_choco_without_winget(self):
+        """winget is offered first (the manager is simply *absent* here, which
+        _winget_install humouring as None models) and choco takes over —
+        falling through is the contract, not skipping the attempt."""
+        nt, mgr = self._as_nt({"choco": "/ch"})
+        with nt, mgr, \
+             mock.patch.object(install_tools, "_winget_install",
+                               return_value=None) as winget, \
+             mock.patch.object(install_tools, "_choco_install",
+                               return_value=(True, "choco ok")) as choco:
+            ok, _ = install_tools.install_exiftool()
+        self.assertTrue(ok)
+        winget.assert_called_once_with("OliverBetz.ExifTool")
+        choco.assert_called_once_with("exiftool")
+
+    def test_sysutils_splits_across_managers(self):
+        """dig has no winget manifest (ISC ships BIND as a zip) — it must
+        take the choco path while whois takes winget, in one --only run."""
+        nt, mgr = self._as_nt({"winget": "/wt", "choco": "/ch"})
+        with nt, mgr, \
+             mock.patch.object(install_tools, "_winget_install",
+                               return_value=(True, "winget ok")) as winget, \
+             mock.patch.object(install_tools, "_choco_install",
+                               return_value=(True, "choco ok")) as choco:
+            ok, _detail = install_tools.install_sysutils()
+        self.assertTrue(ok)
+        winget.assert_called_once_with("Microsoft.Sysinternals.Suite")
+        choco.assert_called_once_with("bind-toolsonly")
+
+    def test_sysutils_without_managers_points_every_tool_someplace(self):
+        nt, mgr = self._as_nt({})
+        with nt, mgr:
+            ok, detail = install_tools.install_sysutils()
+        self.assertFalse(ok)
+        for tool in ("dig", "whois"):
+            self.assertIn(tool, detail)
+        # Both tools carry an honest manual pointer — no silent gaps.
+        self.assertIn("isc.org", detail)
+        self.assertIn("sysinternals", detail)
+
+    def test_torsocks_on_windows_names_the_proxy_alternative(self):
+        nt, mgr = self._as_nt({})
+        with nt, mgr:
+            ok, detail = install_tools.install_torsocks()
+        self.assertFalse(ok)
+        self.assertIn("SPYGLASS_PROXY", detail)
+
+    def test_windows_branches_never_run_apt_or_brew(self):
+        """A missing os.name guard would shell out to sudo on a Windows box
+        (or brew to a Mac user); the branch table must contain them."""
+        nt, mgr = self._as_nt({"winget": "/wt"})
+        with nt, mgr, \
+             mock.patch.object(install_tools, "_apt_install") as apt, \
+             mock.patch.object(install_tools, "_winget_install",
+                               return_value=(True, "ok")):
+            install_tools.install_exiftool()
+            install_tools.install_sysutils()
+        apt.assert_not_called()
 
 
 if __name__ == "__main__":

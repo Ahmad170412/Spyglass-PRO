@@ -17,7 +17,7 @@ pkg = imp("")
 
 class VersionTest(unittest.TestCase):
     def test_package_version(self):
-        self.assertEqual(spyglass_pro.__version__, "1.0.0")
+        self.assertEqual(spyglass_pro.__version__, "1.1.0")
 
     def test_package_version_matches_distribution(self):
         """pyproject and the app must agree — two version strings that
@@ -47,6 +47,15 @@ class VersionTest(unittest.TestCase):
         data = client.get("/api/status").get_json()
         self.assertEqual(data["status"], "ok")
         self.assertEqual(data["version"], spyglass_pro.__version__)
+
+    def test_dashboard_shows_version_and_key_count(self):
+        """The HTML shell renders its version chip and the initial
+        API-key fraction from the server — hardcoding either in the
+        template is how a 1.0 release displays a stale "0/9" forever."""
+        from spyglass_pro import app as app_module
+        html = app_module.app.test_client().get("/").data.decode()
+        self.assertIn(f"v{spyglass_pro.__version__}</span>", html)
+        self.assertIn(f"0/{len(app_module._SETTINGS_SPEC)}</span>", html)
 
     def test_modules_dir_is_importable(self):
         """The engines must import the same way runner.py loads them."""

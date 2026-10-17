@@ -82,7 +82,7 @@ def load_all() -> dict:
     with _LOCK:
         if _LOADED:
             return _REGISTRY
-        for module in ("instagram", "mastodon", "bluesky"):
+        for module in ("instagram", "mastodon", "bluesky", "github"):
             try:
                 importlib.import_module(f"{__package__}.platforms.{module}")
             except Exception:  # noqa: S112 - a broken adapter must not hide the rest

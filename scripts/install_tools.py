@@ -8,8 +8,13 @@ absent. Nothing in this repository installs those tools, so a fresh clone
 reports near-empty modules. This script closes that gap — every tool the
 dashboard can detect has an installer or an honest manual pointer here.
 
-Detection mirrors ``utils.py`` exactly, including blackbird's fallback path
-scan, so "present" here means the same thing it means to the application.
+Detection uses the application's own constants: blackbird's clone-location
+fallback list is *imported* from ``spyglass_osint.utils`` rather than kept
+as a here-maintained mirror, so the installer can agree with the engine
+exactly — if a resolver drifts, the installer drifts with it or fails
+loudly at import, never silently. Installs go through the package manager
+each platform actually ships with — brew on macOS, apt on Debian/Ubuntu,
+and winget (with a choco fallback) on Windows.
 
     python scripts/install_tools.py            # install what's missing
     python scripts/install_tools.py --check    # report only, change nothing
@@ -31,21 +36,30 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
-# ── detection (kept in sync with spyglass_osint/utils.py) ────────────────────
-
+# ── detection (imported from the application, not mirrored) ─────────────────
+#
 # Blackbird is a git clone rather than a console script, so `which` misses it
-# and utils.py falls back to scanning these locations. Mirror that exactly
-# (utils.py also probes a Windows pipx dir; on Windows `~` expands to
-# %USERPROFILE% so the .local/.pyx entries cover it the same way).
-_BLACKBIRD_FALLBACKS = (
-    "/opt/blackbird",
-    os.path.expanduser("~/.local/bin/blackbird"),
-    "/opt/homebrew/bin/blackbird.py",
-    "/usr/local/bin/blackbird.py",
-    os.path.expanduser("~/blackbird"),
-    os.path.expanduser("~/.pyx/bin/blackbird"),
-)
+# and the engine falls back to fixed clone layouts. Import that list instead
+# of keeping a second copy here: two hand-synced lists are one known drift
+# bug (see AUDIT-2026-10.md's acceptance find) plus the one the installer
+# itself shipped with. Import fails closed — loud SystemExit, not a quiet
+# false negative — and this script only ever runs from a repository checkout
+# (it is not packaged), so the path is always the vendored engine.
+
+_MODULES_DIR = str(Path(__file__).resolve().parents[1] / "spyglass_pro" / "modules")
+if os.path.isdir(_MODULES_DIR) and _MODULES_DIR not in sys.path:
+    sys.path.insert(0, _MODULES_DIR)
+
+try:
+    from spyglass_osint.utils import _BLACKBIRD_PATHS
+except ImportError as _exc:
+    raise SystemExit(
+        f"install_tools.py: cannot resolve the engine's own detection "
+        f"({_exc}). Run this script from a Spyglass-Pro repository "
+        f"checkout — it is not packaged with the wheel."
+    ) from None
 
 
 def _which(name):
@@ -56,17 +70,10 @@ def _blackbird_path():
     for candidate in (shutil.which("blackbird"), shutil.which("blackbird.py")):
         if candidate:
             return candidate
-    for directory in _BLACKBIRD_FALLBACKS:
-        path = candidate_file(directory)
-        if path:
+    for path in _BLACKBIRD_PATHS:
+        if os.path.isfile(path):
             return path
     return None
-
-
-def candidate_file(directory):
-    """Return <directory>/blackbird.py when it exists, else None."""
-    path = os.path.join(directory, "blackbird.py") if os.path.isdir(directory) else directory
-    return path if os.path.isfile(path) else None
 
 
 # ── installers ──────────────────────────────────────────────────────────────
@@ -92,6 +99,47 @@ def _apt_install(*packages):
     if not shutil.which("apt-get"):
         return None
     return _run(["sudo", "apt-get", "install", "-y", *packages])
+
+
+def _winget_install(package_id):
+    """winget branch for Windows. None = unavailable (so the caller can fall
+    through to the next manager or the manual pointer). The silent/agreement
+    flags keep this unattended-safe; a success still needs a *terminal*
+    restart for the tool to land on PATH, which the returned detail notes."""
+    winget = shutil.which("winget")
+    if not winget:
+        return None
+    proc = subprocess.run(
+        [winget, "install", "--id", package_id, "--exact", "--silent",
+         "--accept-package-agreements", "--accept-source-agreements"],
+        capture_output=True, text=True)
+    if proc.returncode == 0:
+        return True, (f"installed via winget ({package_id}) — open a new "
+                      "terminal so PATH picks it up, then restart the server")
+    # winget writes progress to stdout and reasons to stderr; surface the
+    # last line of whichever spoke, plus the exit code it died with.
+    output = (proc.stderr or proc.stdout or "").strip()
+    tail = output.splitlines()[-1] if output else "no output"
+    return False, (f"winget install of {package_id} failed "
+                   f"(exit {proc.returncode}): {tail}")
+
+
+def _choco_install(*packages):
+    """choco fallback when winget is absent or an ID has no winget package.
+    3010 is chocolatey's 'reboot required' — the files exist either way."""
+    choco = shutil.which("choco")
+    if not choco:
+        return None
+    proc = subprocess.run([choco, "install", "-y", "--no-progress",
+                           *packages], capture_output=True, text=True)
+    names = ", ".join(packages)
+    if proc.returncode in (0, 3010):
+        return True, (f"installed via choco ({names}) — restart the server "
+                      "so the new tool is found")
+    output = (proc.stderr or proc.stdout or "").strip()
+    tail = output.splitlines()[-1] if output else "no output"
+    return False, (f"choco install of {names} failed "
+                   f"(exit {proc.returncode}): {tail}")
 
 
 def install_sherlock():
@@ -133,8 +181,15 @@ def install_shodan():
 
 
 def install_exiftool():
+    """brew / winget+choco / apt / manual, in that order per platform."""
     if shutil.which("brew"):
         return _run(["brew", "install", "exiftool"])
+    winget = _winget_install("OliverBetz.ExifTool")
+    if winget is not None:
+        return winget
+    choco = _choco_install("exiftool")
+    if choco is not None:
+        return choco
     apt = _apt_install("libimage-exiftool-perl")
     if apt is not None:
         return apt
@@ -154,7 +209,37 @@ def _have_sysutils():
     return all(shutil.which(tool) for tool in ("dig", "whois", "curl"))
 
 
+# Package IDs for dig/whois/curl on Windows, where no single package
+# manager carries all three. Verified against the live winget-pkgs and
+# chocolatey registries (2026-10); a None winget id means "no winget
+# manifest exists" — ISC ships BIND as a zip, so choco's bind-toolsonly
+# is the closest packaged equivalent.
+_WINDOWS_SYSUTILS = {
+    "dig":   (None, ("bind-toolsonly",),
+              "download BIND tools from isc.org/downloads — dig.exe is "
+              "standalone, no BIND server needed"),
+    "whois": ("Microsoft.Sysinternals.Suite", ("sysinternals",),
+              "Sysinternals Whois from learn.microsoft.com/sysinternals/downloads/whois"),
+}
+
+
 def install_sysutils():
+    """dig + whois + curl, per platform.
+
+    curl ships with Windows 10+, so the Windows branch concerns dig (BIND
+    tools) and whois (Sysinternals). POSIX keeps the one-shot package
+    manager call.
+    """
+    if os.name == "nt":
+        outcomes = []
+        for name, spec in _WINDOWS_SYSUTILS.items():
+            ok, detail = _install_windows_tool(name, *spec)
+            outcomes.append((ok, name, detail))
+        failed = [(name, detail) for ok, name, detail in outcomes if not ok]
+        if not failed:
+            return True, "installed via winget/choco: " + ", ".join(
+                name for _, name, _ in outcomes)
+        return False, "; ".join(f"{name} — {detail}" for name, detail in failed)
     if shutil.which("brew"):
         return _run(["brew", "install", "bind", "whois", "curl"])
     apt = _apt_install("dnsutils", "whois", "curl")
@@ -163,8 +248,27 @@ def install_sysutils():
     return False, "install dig, whois and curl with your package manager"
 
 
+def _install_windows_tool(name, winget_id, choco_ids, manual):
+    """One Windows tool through winget, then choco, then an honest pointer."""
+    if winget_id:
+        result = _winget_install(winget_id)
+        if result is not None:
+            return result
+    for package in choco_ids:
+        result = _choco_install(package)
+        if result is not None:
+            return result
+    return False, (f"no winget or choco found — install {name} manually: {manual}")
+
+
 def install_torsocks():
     """Tor SOCKS proxy — used to route dig/whois over Tor for .onion lookups."""
+    if os.name == "nt":
+        # There is no torsocks port for Windows; the honest Windows-native
+        # alternative is pointing SPYGLASS_PROXY at a Tor SOCKS endpoint.
+        return False, ("no torsocks for Windows — .onion DNS routing is a "
+                       "POSIX feature here; use SPYGLASS_PROXY=socks5://127.0.0.1:9050 "
+                       "(a Tor SOCKS endpoint) instead")
     if shutil.which("brew"):
         return _run(["brew", "install", "torsocks"])
     if shutil.which("apt-get"):
