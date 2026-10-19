@@ -951,7 +951,7 @@ var SOCIAL_META = {};
    for GitHub; this map only ever paints a name, never gates behaviour. */
 var SOCIAL_FALLBACK_LABELS = {
   instagram: 'Instagram', mastodon: 'Mastodon', bluesky: 'Bluesky',
-  github: 'GitHub', gitlab: 'GitLab'
+  github: 'GitHub', gitlab: 'GitLab', keybase: 'Keybase'
 };
 
 function socialLabel(key) {
@@ -981,7 +981,8 @@ function setSocialPlaceholder(key) {
     mastodon: 'user or user@instance',
     bluesky: 'user.bsky.social',
     github: 'github username or org',
-    gitlab: 'gitlab username or org'
+    gitlab: 'gitlab username or org',
+    keybase: 'keybase username'
   };
   input.placeholder = hints[key] || 'handle';
 }

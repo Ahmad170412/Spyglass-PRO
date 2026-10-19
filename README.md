@@ -7,6 +7,7 @@
 ### One dashboard. Three recon engines. **Zero packets sent to your target.**
 
 [![CI](https://github.com/Ahmad170412/Spyglass-PRO/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmad170412/Spyglass-PRO/actions)
+[![Release](https://img.shields.io/github/v/release/Ahmad170412/Spyglass-PRO?color=6366f1&label=release)](https://github.com/Ahmad170412/Spyglass-PRO/releases)
 [![PyPI version](https://img.shields.io/pypi/v/spyglass-pro.svg)](https://pypi.org/project/spyglass-pro/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-06b6d4.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
@@ -50,6 +51,7 @@ a target, and how do I know the answer is real?**
 
 ## Table of Contents
 
+- [What's new in 1.1](#whats-new-in-11)
 - [Quick Start](#quick-start)
 - [Features](#features)
 - [Architecture](#architecture)
@@ -66,6 +68,39 @@ a target, and how do I know the answer is real?**
 - [Changelog](CHANGELOG.md)
 - [Responsible use](#responsible-use)
 - [License](#license)
+
+---
+
+## What's new in 1.1
+
+1.1 is a hardening release: three new **keyless** social sources, a security
+pass over the seams between versions, and honest answers where 1.0 was thin.
+The full list is in the [changelog](CHANGELOG.md).
+
+- **Keybase** joins the social panel — keyless, and the strongest correlation
+  source in the tree: it returns the account's cryptographically-**proven**
+  identities (Twitter, GitHub, Reddit, Hacker News, DNS, web), claimed by the
+  user's own key. That is a fact, not a guess from a shared handle.
+- **GitHub and GitLab** are keyless too. Both report the budget tier their
+  *response* actually came back with (GitHub 60 req/h, GitLab 500 req/min
+  unauthenticated); set `GITHUB_TOKEN` / `GITLAB_TOKEN` to raise it, and the
+  panel says which tier it got instead of assuming.
+- **The case store keeps its promise.** With `SPYGLASS_STORE_KEY` set, the
+  entity index is now encrypted alongside the result snapshot — before, the
+  index held the same domains, IPs and emails in cleartext, leaking exactly
+  what the encryption existed to protect.
+- **The default install is closed off.** With no token, the dashboard answers
+  only loopback `Host`s (DNS-rebinding defense), refuses cross-site /
+  foreign-`Origin` browser requests, masks proxy credentials in every
+  response, and sets a `Content-Security-Policy` plus the usual framing and
+  sniffing headers.
+- **IPv6 works.** The `ip` module accepted an IPv6 literal and then always
+  failed to resolve it; it resolves now, and a malformed address is refused
+  instead of accepted.
+- **Real phone formats pass, flag-shaped input does not** — `+1 415 555 0100`
+  and `(415) 555-0100` are accepted; a leading `-` is not.
+- **Windows and CI.** Broader Windows tool fallbacks (winget/choco), a Windows
+  test job, and a `mypy` job that actually runs in CI.
 
 ---
 
@@ -90,14 +125,22 @@ python run.py
 
 Open <http://127.0.0.1:5000>.
 
-That's it — **Website**, **IP Address**, **Full Investigation** and the
-keyless social panels (**GitLab**, **GitHub**, **Mastodon**, **Bluesky**)
-work immediately on a bare install. To light up the email/username/phone panels:
+That's it — the keyless panels (**Website**, **IP Address**, **Full
+Investigation**, and the social adapters **GitLab**, **GitHub**, **Keybase**,
+**Mastodon**, **Bluesky**) work immediately. The **email**, **username** and
+**phone** panels need optional CLI engines. The one-line installer ships with a
+**source checkout**, not the wheel, so use it from the clone above:
 
 ```bash
 python scripts/install_tools.py --check    # see what's missing
 python scripts/install_tools.py            # install the missing ones
 ```
+
+If you installed from PyPI (no checkout), install the engines directly — the
+installer's docstring lists the exact command per tool and platform. The Python
+ones go through `pipx` (isolated venvs); `blackbird` is a git clone and
+`phoneinfoga` a release binary, so the script is the reliable path when you
+have the source.
 
 `run.py` adds the venv, pipx and blackbird locations to `PATH` itself, so the
 server finds your engines even when launched from cron, a container or a
@@ -118,7 +161,7 @@ launch agent instead of a login shell.
 | **Investigation** | Runs every engine in parallel and correlates shared emails, IPs, domains and usernames |
 | **OPSEC** | Local self-check: your real IP, proxy status, DNS-leak exposure, timezone/geo fingerprint risk |
 | **Metadata** | ExifTool + PDF/OOXML/image fallbacks, MD5/SHA-256, GPS, with file-type reconciliation |
-| **Social** | Instagram (stealth browser) + GitLab, GitHub, Mastodon and Bluesky (keyless, instant), one registry-driven panel |
+| **Social** | Instagram (stealth browser) + GitLab, GitHub, Keybase, Mastodon and Bluesky (keyless, instant), one registry-driven panel |
 | **Cases** | Encrypted-at-rest run history with entity diffing, timelines and dossier export |
 
 ---
@@ -178,12 +221,15 @@ wants a license key:
 pip install cloakbrowser
 ```
 
-GitLab, GitHub, Mastodon and Bluesky are keyless JSON sources: they need no
-browser, no account and no key, and work on a bare install. Both code forges
-fill the same panel shape from very different APIs — with GitLab's unauthenticated
-profile being the honest *short* form (name, handle, avatar, state, published
-email), so the panel's capability header never promises what the keyless API
-cannot return.
+GitLab, GitHub, Keybase, Mastodon and Bluesky are keyless JSON sources: they
+need no browser, no account and no key, and work on a bare install. The two
+code forges fill the same panel shape from very different APIs — with GitLab's
+unauthenticated profile being the honest *short* form (name, handle, avatar,
+state, published email) — so the panel's capability header never promises what
+the keyless API cannot return. Keybase is the odd one out and the most useful:
+it returns the account's cryptographically-**proven** identities (the Twitter,
+GitHub, Reddit and Hacker News accounts the user has signed for), which is
+correlation you can trust rather than infer.
 
 </details>
 
@@ -201,9 +247,12 @@ python scripts/install_tools.py            # install the missing ones
 
 This covers sherlock, maigret, holehe, ignorant, blackbird, user-scanner,
 shodan, phoneinfoga, exiftool, dig/whois/curl and torsocks — every tool the
-dashboard can detect. The script is idempotent — re-running it only installs
-what is still missing. Python CLIs install via pipx (isolated venvs, no
-dependency conflicts); system tools via brew or apt.
+dashboard can detect. It ships with a **source checkout** (`git clone` /
+`pip install -e .`), not the published wheel; a PyPI install has no
+`scripts/` directory, so install the engines directly there. The script is
+idempotent — re-running it only installs what is still missing. Python CLIs
+install via pipx (isolated venvs, no dependency conflicts); system tools via
+brew or apt.
 
 ### What you get without them
 
@@ -217,8 +266,11 @@ what a bare install can and cannot do:
 | Phone | phoneinfoga + ignorant, plus breach | **breach data only** |
 
 Breach checking (LeakCheck + Scylla) needs no account and no CLI tool, so it
-works on a bare install. **Website**, **IP Address** and **Full
-Investigation** need no external *recon* engines and work immediately.
+works on a bare install. **Website** and **IP Address** run without any *recon*
+engine, but their richer legs depend on tools that may be absent — Website uses
+`dig`, `whois` and `curl`; IP uses `shodan` for host/port data. **Full
+Investigation** merges the modules above, so its coverage is theirs. `GET
+/api/status` reports exactly which tools are missing on your machine.
 
 To confirm what the running server can see, `GET /api/status` returns a
 per-tool `true`/`false` map, a `missing_tools` list and a per-panel `degraded`
@@ -267,6 +319,7 @@ All settings are environment variables (CLI flags exist for the basics — see
 | `SPYGLASS_PRO_HOST` | `127.0.0.1` | Bind address |
 | `SPYGLASS_PRO_PORT` | `5000` | Port |
 | `SPYGLASS_PRO_TOKEN` | — | Require this Bearer token on every `/api/*` route |
+| `SPYGLASS_PRO_ALLOWED_HOSTS` | loopback + bind | Extra `Host` values to accept when no token is set (comma-separated; `*` disables the check) |
 | `SPYGLASS_PRO_SECRET` | random per process | Flask `SECRET_KEY` |
 | `SPYGLASS_PRO_DEBUG` | `0` | Werkzeug debug mode (**RCE console — never enable on a reachable host**) |
 | `SPYGLASS_PRO_MAX_QUEUE` | `16` | Max pending scan jobs before a 429 |
@@ -277,11 +330,19 @@ All settings are environment variables (CLI flags exist for the basics — see
 | `SPYGLASS_STORE_PASS` | — | Derive the Fernet key from a password instead |
 
 **Non-loopback deployments** must set `SPYGLASS_PRO_TOKEN`; the server warns at
-startup if you don't:
+startup if you don't. While no token is set the dashboard answers only requests
+whose `Host` is loopback (or listed in `SPYGLASS_PRO_ALLOWED_HOSTS`) — that is
+what stops a DNS-rebinding page from reaching it. Serving it under a real
+hostname without a token therefore needs `SPYGLASS_PRO_ALLOWED_HOSTS`, e.g.:
 
 ```bash
 SPYGLASS_PRO_TOKEN=$(openssl rand -hex 24) python3 run.py
 ```
+
+Independently of the token, browser requests tagged cross-site
+(`Sec-Fetch-Site: cross-site`) or carrying a foreign `Origin` are refused, and
+every response sets `Content-Security-Policy`, `X-Frame-Options`,
+`X-Content-Type-Options` and `Referrer-Policy`.
 
 ---
 
@@ -342,8 +403,11 @@ what the **Stored Cases** panel reads:
   profile.
 
 Data at rest is encrypted with Fernet when `SPYGLASS_STORE_KEY` or
-`SPYGLASS_STORE_PASS` is set; otherwise it is stored in plaintext. JSON/CSV/
-report artifacts from a scan land in the working directory of the run.
+`SPYGLASS_STORE_PASS` is set; otherwise it is stored in plaintext. This covers
+both the result snapshot and the entity index (domains, IPs, emails, orgs) —
+the index rows hold the same targets, so encrypting one without the other would
+leak them. JSON/CSV/report artifacts from a scan land in the working directory
+of the run.
 
 ---
 
@@ -353,10 +417,11 @@ report artifacts from a scan land in the working directory of the run.
 .venv/bin/python tests/run_tests.py
 ```
 
-**500 offline checks** — the three engines' own suites plus the merge layer
-(API surface, auth gate, proxy validation, job pool, target validation, case
-queries, cross-platform filename and decoding behaviour) and the node-checked
-dashboard JS. No network, no browser, finishes in a few seconds.
+**545 offline checks** — the three engines' own suites plus the merge layer
+(API surface, auth gate, request-origin gate, proxy validation and masking,
+job pool, target validation incl. IPv6, entity encryption, case queries,
+cross-platform filename and decoding behaviour) and the node-checked dashboard
+JS. No network, no browser, finishes in a few seconds.
 
 CI runs the suite on Python 3.10–3.13 (plus macOS and Windows), type-checks
 with `mypy`, lints with `ruff`, `node --check`s the dashboard JS, and asserts
@@ -387,7 +452,7 @@ a bug:
 ```
 run.py                     dev entry point
 scripts/install_tools.py   idempotent CLI-engine installer
-tests/                     500 offline checks (run_tests.py)
+tests/                     545 offline checks (run_tests.py)
 assets/logo.svg            README logo
 spyglass_pro/
   app.py                   Flask routes + auth gate + proxy validation

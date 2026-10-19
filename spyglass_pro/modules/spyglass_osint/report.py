@@ -238,7 +238,7 @@ def _render_website(r: dict) -> list[str]:
     covered = {
         "dns_records", "dns_email_security", "wildcard_dns",
         "subdomains", "subdomain_sources", "wayback_subdomains",
-        "crt_sh_subdomains", "http_probe", "port_scan", "shodan",
+        "crt_sh_subdomains", "shodan",
         "directories", "interesting_files", "robots", "sitemap",
         "js_endpoints", "js_interesting", "reverse_dns", "ptr_sweep",
         "http_headers", "security_headers", "cookies", "csp_domains",

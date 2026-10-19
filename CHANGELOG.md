@@ -7,9 +7,10 @@ may not disagree (a pinning test fails if they do).
 
 ## 1.1.0 — 2026-10-17
 
-Hardening release: no changes to any module's output semantics — two new
-keyless data sources, plus release-quality fixes to the seams that could drift
-between versions.
+Hardening release: three new keyless social sources, plus a security and
+release-quality pass over the seams that could drift between versions. Every
+change is safe by default — the new gate and headers only affect an
+unauthenticated server, and no module loses a capability.
 
 **Added**
 
@@ -37,6 +38,20 @@ between versions.
   budget is spent; locked/banned states are notes on the result. The
   keyless budget is GitLab's own number (500 requests/minute per IP,
   read from the instance's rate headers, never assumed).
+- **Keybase** social source, keyless through
+  `keybase.io/_/api/1.0/user/lookup.json`. Unlike every other source it
+  returns the account's **cryptographically-proven identity proofs** — the
+  Twitter, GitHub, Reddit, Hacker News, DNS and website accounts the user
+  signed for with their Keybase key — which is proven cross-platform
+  correlation rather than a guess from a shared handle. Only proofs in the
+  proven state count as links; pending or revoked proofs are reported as a
+  count and never folded into the verified set. The honest short form is
+  stated up front: a profile (name, location, bio, avatar, creation time),
+  the proof list and any on-file cryptocurrency addresses — but no
+  follower/following counts and no post list, so those are neither promised
+  nor fabricated. Unknown handles answer exactly (`{"them": [null]}`), and a
+  name that fails Keybase's own 2–16 character rule is rejected locally
+  before any request. No browser, no login, no key.
 - **Optional forge tokens from the environment.** Both adapters honour a
   `GITHUB_TOKEN` / `GITLAB_TOKEN` environment variable when set and report
   the budget tier the *response* actually came back with ("keyless GitHub
@@ -56,6 +71,54 @@ between versions.
   panel* instead of silently swapped — consistent with the rule that a
   partial state never renders as a confident one. A failed registry
   fetch no longer blanks the selection.
+
+- IPv6 targets now resolve. The `ip` module accepted
+  `2001:4860:4860::8888` but `_resolve` was IPv4-only (`inet_aton`), so
+  every IPv6 lookup died at "Could not resolve: …". Resolution asks the
+  `ipaddress` module first and normalizes the address; validation uses the
+  same literal check, so a stray colon (`gggg::1`) no longer passes as an
+  address it never was.
+- Phone and email validation matched the wrong shapes: `+1 415 555 0100`
+  and `(415) 555-0100` were refused for containing a space or parens, while
+  `-1234567` and `-a@b.com` were accepted — a leading dash could reach an
+  engine's argv. Real phone separators are accepted, a leading `-` is
+  refused, and an email local part must now start alphanumerically.
+- README accuracy. The CLI-engine installer ships with a **source
+  checkout**, not the wheel, so a PyPI install was told to run a file it
+  does not have; the Quick Start now scopes it to a clone and directs pip
+  users to install the engines directly. The "works on a bare install"
+  claim was softened to name the tools Website and IP actually use (`dig`,
+  `whois`, `curl`, `shodan`). The `README`/`SECURITY.md` encryption wording
+  now says the entity index is encrypted too.
+
+**Security (follow-up audit)**
+
+- **Entity index now encrypted.** With `SPYGLASS_STORE_KEY` or
+  `SPYGLASS_STORE_PASS` set, `runs.result_json` was Fernet ciphertext but
+  the `entities` table — which holds the same domains, IPs, emails and
+  orgs — was written in cleartext, so the store leaked exactly the target
+  data it claimed to protect. Both are encrypted now and legacy plaintext
+  rows still read. `SECURITY.md` and the README already made the promise;
+  the code now keeps it.
+- **Request-origin gate.** The default install is unauthenticated, so a
+  DNS-rebinding page could read the whole API by pointing its own domain at
+  `127.0.0.1` — the rebound request carries that domain as `Host` and looks
+  same-origin to the attacker's page. While no token is set, requests are
+  answered only under a loopback `Host` or one listed in the new
+  `SPYGLASS_PRO_ALLOWED_HOSTS`; browser requests marked
+  `Sec-Fetch-Site: cross-site`, or carrying a foreign `Origin`, are refused.
+  A non-browser client sends neither header and is unaffected, and a token
+  makes the host check unnecessary so hostname/proxy access keeps working.
+- **Proxy credentials are no longer echoed.** `/api/status`, `/api/settings`
+  and `/api/proxy` returned `http://user:pass@host:port` verbatim. They now
+  return `http://••••@host:port`; an untouched Settings box (pre-filled with
+  the mask) is left unchanged, and an edited mask is rejected with a clear
+  message rather than stored as a literal credential.
+- **Baseline response headers.** Every response now carries a
+  `Content-Security-Policy` (strict `script-src 'self'`,
+  `frame-ancestors 'none'`, remote avatars still allowed), plus
+  `X-Frame-Options`, `X-Content-Type-Options` and `Referrer-Policy`; a
+  stray unused jsDelivr preconnect was dropped from the shell.
 
 **Version attribution**
 - Fixed version attribution across the tree. `pyproject.toml`,

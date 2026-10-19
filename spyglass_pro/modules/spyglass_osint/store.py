@@ -13,6 +13,13 @@ Data at rest is encrypted with Fernet (AES-128-GCM). The key is derived
 from ``SPYGLASS_STORE_KEY`` (base64-encoded 32-byte key) or from
 ``SPYGLASS_STORE_PASS`` (via PBKDF2 with 100k iterations). If neither is
 set, data is stored in plaintext (backwards compatible).
+
+Both the result snapshot *and* the entity index are encrypted: the index
+holds the same target identifiers (domains, IPs, emails, orgs) as the
+result JSON, so leaving it in cleartext would defeat the encryption the
+store advertises. The entity ``kind`` column stays cleartext — it is a
+fixed vocabulary (domain/ip/email/org/onion/breach/username), not target
+data.
 """
 
 from __future__ import annotations
@@ -213,9 +220,12 @@ def store_result(result, qtype, target):
         )
         run_id = cur.lastrowid
         for kind, value in _entities(result, qtype):
+            # The index carries the same targets as the result blob; encrypt
+            # the value too or the store leaks in cleartext what the blob
+            # protects. kind stays plaintext (fixed vocabulary).
             db.execute(
                 "INSERT INTO entities (run_id, kind, value) VALUES (?, ?, ?)",
-                (run_id, kind, value),
+                (run_id, kind, _encrypt(value)),
             )
         db.commit()
         if _get_fernet():
@@ -247,7 +257,9 @@ def _entity_set(db, run_id):
     rows = db.execute(
         "SELECT kind, value FROM entities WHERE run_id=?", (run_id,)
     ).fetchall()
-    return {f"{r['kind']}:{r['value']}" for r in rows}
+    # Values are encrypted at rest (see store_result); decrypt for diff/timeline.
+    # _decrypt passes cleartext through, so pre-encryption stores still read.
+    return {f"{r['kind']}:{_decrypt(r['value'])}" for r in rows}
 
 
 # ─── queries ──────────────────────────────────────────────

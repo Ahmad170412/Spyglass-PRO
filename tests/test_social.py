@@ -93,11 +93,11 @@ class RegistryTest(unittest.TestCase):
     def test_bundled_platforms_register(self):
         keys = [platform["key"] for platform in registry.describe()]
         for expected in ("instagram", "mastodon", "bluesky", "github",
-                         "gitlab"):
+                         "gitlab", "keybase"):
             self.assertIn(expected, keys)
 
     def test_keyless_platforms_need_no_browser_or_login(self):
-        for key in ("mastodon", "bluesky", "github", "gitlab"):
+        for key in ("mastodon", "bluesky", "github", "gitlab", "keybase"):
             platform = registry.get(key)
             self.assertEqual(platform.login, "none")
             self.assertFalse(platform.browser)
@@ -840,6 +840,172 @@ class GitlabCollectTest(unittest.TestCase):
         self.assertTrue(result["found"])
         self.assertIsNone(result["post_count"])   # 0 is a count; None isn't
         self.assertFalse(any("X-Total" in n for n in result["notes"]))
+
+
+# The public lookup object, trimmed to the fields the adapter asks for. The
+# proofs carry a canonical ``service_url`` and a ``state`` (1 = proven), and
+# the response nests the profile under ``basics``/``profile``/``pictures``.
+KEYBASE_USER = {
+    "id": "23260c2ce19420f97b58d7d95b68ca00",
+    "basics": {"username": "chris", "ctime": 1391653108, "id_version": 1285},
+    "profile": {
+        "full_name": "Chris Coyne",
+        "location": "Maine",
+        "bio": "Previously worked on Keybase, OkCupid.",
+    },
+    "proofs_summary": {
+        "all": [
+            {"proof_type": "twitter", "nametag": "malgorithms", "state": 1,
+             "service_url": "https://twitter.com/malgorithms"},
+            {"proof_type": "github", "nametag": "malgorithms", "state": 1,
+             "service_url": "https://github.com/malgorithms"},
+            {"proof_type": "reddit", "nametag": "malgorithms", "state": 1,
+             "service_url": "https://reddit.com/user/malgorithms"},
+            {"proof_type": "hackernews", "nametag": "malgorithms", "state": 1,
+             "service_url": "https://news.ycombinator.com/user?id=malgorithms"},
+            {"proof_type": "generic_web_site", "nametag": "chriscoyne.com",
+             "state": 1, "service_url": "https://chriscoyne.com"},
+        ],
+        "cryptocurrency": [{"type": "bitcoin", "address": "3LKaAcHgUjaB3Zw"}],
+    },
+    "pictures": {"primary": {"url": "https://s3.example/chris_360.jpg"}},
+}
+
+
+class KeybaseLoginValidationTest(unittest.TestCase):
+    """Handles are validated locally so a typo never spends a request."""
+
+    def _collect(self, handle):
+        from unittest import mock
+
+        from spyglass_pro.social.platforms import keybase
+
+        result = schema.new_result("keybase", handle)
+        with mock.patch.object(keybase.httpx, "Client") as client:
+            keybase.collect(None, {}, handle, result)
+        client.assert_not_called()
+        return result
+
+    def test_valid_handles_pass_the_regex(self):
+        from spyglass_pro.social.platforms import keybase
+        # 2-16 chars, letters/digits/underscore, first char alphanumeric.
+        for handle in ("a1", "chris", "a_b", "x_y", "A" * 16):
+            self.assertTrue(keybase._LOGIN_RE.fullmatch(handle), handle)
+
+    def test_invalid_handles_never_reach_the_network(self):
+        for handle in ("", "a", "-chris", "_chris", "chris-x", "chris x",
+                       "user@example.com", "A" * 17):
+            self.assertFalse(self._collect(handle)["found"])
+        self.assertIn("not a valid Keybase username",
+                      self._collect("user@example.com")["error"])
+
+
+class KeybaseNormalizeTest(unittest.TestCase):
+    def _result(self, profile=None):
+        from spyglass_pro.social.platforms import keybase
+
+        result = schema.new_result("keybase", "chris")
+        keybase.normalize(profile if profile is not None else KEYBASE_USER,
+                          result)
+        return result
+
+    def test_maps_profile_fields(self):
+        result = self._result()
+        self.assertTrue(result["found"])
+        self.assertEqual(result["display_name"], "Chris Coyne")
+        self.assertEqual(result["location"], "Maine")
+        self.assertEqual(result["url"], "https://keybase.io/chris")
+        self.assertEqual(result["avatar_url"], "https://s3.example/chris_360.jpg")
+
+    def test_joined_is_derived_from_ctime_epoch(self):
+        self.assertEqual(self._result()["joined"], "2014-02-06T02:18:28Z")
+
+    def test_proven_proofs_become_external_links(self):
+        """The proof graph is the reason this adapter exists: verified
+        identities, taken from Keybase's own canonical service_url."""
+        links = self._result()["external_links"]
+        self.assertIn("https://github.com/malgorithms", links)
+        self.assertIn("https://news.ycombinator.com/user?id=malgorithms", links)
+        self.assertIn("https://chriscoyne.com", links)
+        self.assertEqual(len(links), 5)
+        self.assertTrue(any("5 proven identity proof" in n
+                            for n in self._result()["notes"]))
+
+    def test_unverified_proofs_are_not_counted_as_identities(self):
+        profile = dict(KEYBASE_USER)
+        profile["proofs_summary"] = dict(KEYBASE_USER["proofs_summary"])
+        profile["proofs_summary"]["all"] = KEYBASE_USER["proofs_summary"]["all"] + [
+            {"proof_type": "twitter", "nametag": "ghost", "state": 0,
+             "service_url": "https://twitter.com/ghost"},
+        ]
+        result = self._result(profile)
+        self.assertNotIn("https://twitter.com/ghost", result["external_links"])
+        self.assertTrue(any("not counted" in n for n in result["notes"]))
+
+    def test_crypto_addresses_are_surfaced(self):
+        notes = " ".join(self._result()["notes"])
+        self.assertIn("cryptocurrency address", notes)
+        self.assertIn("bitcoin", notes)
+
+    def test_followers_are_a_wall_not_an_empty_list(self):
+        self.assertIn("followers", self._result()["walls"])
+
+    def test_missing_profile_is_not_found(self):
+        self.assertFalse(self._result({})["found"])
+
+    def test_no_proofs_says_so(self):
+        profile = dict(KEYBASE_USER, proofs_summary={})
+        notes = " ".join(self._result(profile)["notes"])
+        self.assertIn("no proven identity proofs", notes)
+
+
+class KeybaseCollectTest(unittest.TestCase):
+    """The networked paths, driven offline through mocked _get calls."""
+
+    def _run(self, side_effects, handle="chris"):
+        from unittest import mock
+
+        from spyglass_pro.social.platforms import keybase
+
+        result = schema.new_result("keybase", handle)
+        with mock.patch.object(keybase, "_get", side_effect=side_effects):
+            keybase.collect(None, {}, handle, result)
+        return result
+
+    def test_success_maps_profile_and_proofs(self):
+        result = self._run([
+            (200, {"status": {"code": 0}, "them": [dict(KEYBASE_USER)]}),
+        ])
+        self.assertTrue(result["found"])
+        self.assertEqual(result["source"], "keybase.io public lookup (keyless)")
+        self.assertIn("https://github.com/malgorithms", result["external_links"])
+
+    def test_null_in_them_is_an_exact_miss(self):
+        result = self._run([(200, {"status": {"code": 0}, "them": [None]})])
+        self.assertFalse(result["found"])
+        self.assertEqual(result["error"], "no Keybase account found for @chris")
+
+    def test_api_input_error_is_surfaced_not_hidden(self):
+        result = self._run([
+            (200, {"status": {"code": 100, "name": "INPUT_ERROR",
+                              "desc": "bad list value"}}),
+        ])
+        self.assertFalse(result["found"])
+        self.assertIn("bad list value", result["error"])
+
+    def test_http_failure_is_named(self):
+        result = self._run([(500, None)])
+        self.assertFalse(result["found"])
+        self.assertIn("HTTP 500", result["error"])
+
+    def test_different_returned_username_is_noted(self):
+        """Keybase usernames are immutable, so a differing return is a sign
+        the API resolved something else — surfaced, not swallowed."""
+        profile = dict(KEYBASE_USER)
+        profile["basics"] = dict(KEYBASE_USER["basics"], username="chris")
+        result = self._run([(200, {"status": {"code": 0},
+                                   "them": [profile]})], handle="chriscoyne")
+        self.assertTrue(any("resolves to" in n for n in result["notes"]))
 
 
 INSTAGRAM_REPORT = {

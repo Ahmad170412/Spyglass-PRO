@@ -29,6 +29,22 @@ class ResolveTest(unittest.TestCase):
     def test_localhost_resolves_offline(self):
         self.assertIsNotNone(ip._resolve("localhost"))
 
+    def test_ipv6_literal_resolves(self):
+        # The module accepts IPv6, so it must resolve it rather than fall
+        # through an IPv4-only inet_aton and report "Could not resolve".
+        self.assertEqual(ip._resolve("::1"), "::1")
+        self.assertEqual(ip._resolve("2001:db8::1"), "2001:db8::1")
+
+    def test_ipv6_is_normalized(self):
+        self.assertEqual(
+            ip._resolve("2001:0db8:0000:0000:0000:0000:0000:0001"),
+            "2001:db8::1")
+
+    def test_malformed_ipv6_rejected_offline(self):
+        # A colon is not enough: this must be refused without a DNS lookup.
+        for junk in ("gggg::1", "2001:db8:::1", "12345::"):
+            self.assertIsNone(ip._resolve(junk), junk)
+
 
 if __name__ == "__main__":
     unittest.main()

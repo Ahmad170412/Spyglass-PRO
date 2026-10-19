@@ -5,7 +5,7 @@ import secrets
 import shutil
 import threading
 import time
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
@@ -64,6 +64,29 @@ def _validate_proxy(value):
         return None
     if parsed.scheme.lower() not in _PROXY_SCHEMES or not parsed.hostname:
         return None
+    return value
+
+
+def _mask_proxy(value):
+    """Proxy URL with any userinfo hidden, for anything that echoes it back.
+
+    The credential in ``http://user:pass@host:port`` is the secret; the host
+    and port are not. A proxy without credentials (``socks5://127.0.0.1:9050``)
+    is returned unchanged because it holds no secret. ``/api/status`` and the
+    Settings snapshot must never put a real credential on the wire — the
+    dashboard only ever needs to show *that* a proxy is set.
+    """
+    value = (value or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return "••••"
+    if parsed.username or parsed.password:
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        return f"{parsed.scheme}://••••@{host}{port}"
     return value
 
 
@@ -146,10 +169,114 @@ def _authorized():
     return secrets.compare_digest(supplied.encode(), token.encode())
 
 
+# Names a browser may use to reach the dashboard when it runs without a
+# token. DNS rebinding points an attacker's own domain at 127.0.0.1, so the
+# rebound request carries that domain as ``Host`` and looks same-origin to
+# the attacker's page — the one thing that stops it reading the API is
+# refusing a Host that is not loopback. Operators who serve the dashboard
+# under a real hostname add it to SPYGLASS_PRO_ALLOWED_HOSTS (comma-separated;
+# "*" disables the check).
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1", "0.0.0.0", "::"}
+_WILDCARD_BINDS = {"0.0.0.0", "::"}
+
+
+def _host_name(host):
+    """Lowercased hostname from a Host header, port and IPv6 brackets stripped."""
+    try:
+        return (urlsplit("//" + (host or "").strip()).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _origin_host(origin):
+    """Lowercased hostname from a full Origin URL, or '' when it has none."""
+    try:
+        return (urlsplit((origin or "").strip()).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _allowed_hosts():
+    """(allowed loopback/bind/allowlist names, wildcard) for this process."""
+    names = set(_LOOPBACK_HOSTS)
+    for part in (os.environ.get("SPYGLASS_PRO_ALLOWED_HOSTS") or "").split(","):
+        part = part.strip().lower()
+        if not part:
+            continue
+        if part == "*":
+            return names, True
+        names.add(_host_name(part) or part)
+    try:
+        host, _port, _debug = bind_config()
+    except Exception:
+        host = ""
+    if host and host.lower() not in _WILDCARD_BINDS:
+        names.add(host.lower())
+    return names, False
+
+
+def _host_allowed():
+    """False when an unauthenticated request arrives under a foreign Host.
+
+    Only enforced while the dashboard has no token: with one set, the token
+    is the control (an attacker page cannot present it) and hostname- or
+    proxy-based access must keep working. The default — no token, loopback
+    bind — is exactly the rebinding case, and it is closed here.
+    """
+    if os.environ.get("SPYGLASS_PRO_TOKEN"):
+        return True
+    allowed, wildcard = _allowed_hosts()
+    if wildcard:
+        return True
+    host = _host_name(request.host)
+    return not host or host in allowed
+
+
 @app.before_request
-def _gate_api():
+def _gate_request():
+    # CSRF: browsers label cross-site requests and send Origin on any
+    # cross-origin one, so a foreign page cannot drive the API (including the
+    # side-effecting GET run endpoints) even though it can emit the request.
+    # A non-browser client (curl, the CLI) sends neither header and is
+    # unaffected.
+    if (request.headers.get("Sec-Fetch-Site") or "").strip().lower() == "cross-site":
+        return jsonify({"error": "cross-site request refused"}), 403
+    origin = request.headers.get("Origin")
+    if origin is not None:
+        stripped = origin.strip().lower()
+        if stripped == "null" or _origin_host(origin) != _host_name(request.host):
+            return jsonify({"error": "cross-origin request refused"}), 403
+    if not _host_allowed():
+        return jsonify({"error": "host not allowed: set SPYGLASS_PRO_ALLOWED_HOSTS "
+                                  "to permit it"}), 400
     if not _authorized():
         return jsonify({"error": "unauthorized: set SPYGLASS_PRO_TOKEN and send it as a Bearer token"}), 401
+
+
+@app.after_request
+def _security_headers(resp):
+    """Baseline browser hardening.
+
+    ``connect-src 'self'`` matches the dashboard, which only ever fetches its
+    own /api/; ``img-src`` still allows remote avatars (the social panels
+    render them straight from the platform CDNs). ``style-src`` allows inline
+    styles because the shell uses a ``style`` attribute — there is no inline
+    script, so ``script-src`` stays strict.
+    """
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Content-Security-Policy", (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self'; "
+        "object-src 'none'; base-uri 'self'; form-action 'self'; "
+        "frame-ancestors 'none'"
+    ))
+    return resp
 
 
 @app.route("/")
@@ -192,7 +319,7 @@ def api_status():
     return jsonify({
         "status": "ok",
         "version": __version__,
-        "proxy": os.environ.get("SPYGLASS_PROXY", ""),
+        "proxy": _mask_proxy(os.environ.get("SPYGLASS_PROXY", "")),
         "engines": {
             "spyglass": {"available": True, "label": "Spyglass-OSINT"},
             "lens_extender": {"available": _module_imports("lens_extender"),
@@ -317,7 +444,7 @@ def _settings_snapshot():
     return {"keys": items,
             "configured": sum(1 for i in items if i["configured"]),
             "total": len(items),
-            "proxy": os.environ.get("SPYGLASS_PROXY", "")}
+            "proxy": _mask_proxy(os.environ.get("SPYGLASS_PROXY", ""))}
 
 
 @app.route("/api/settings")
@@ -334,7 +461,19 @@ def api_settings_save():
     cfg = store.load() if store else {}
     # Proxy rides along so Settings is the one place for outbound config.
     if "proxy" in data:
-        proxy = _validate_proxy(data.get("proxy", ""))
+        raw = data.get("proxy", "")
+        current = os.environ.get("SPYGLASS_PROXY", "")
+        # The Settings box is pre-filled with the masked form (see
+        # _settings_snapshot), so an untouched box posts the mask straight
+        # back. Treat that — and only that — as "leave the proxy unchanged".
+        if isinstance(raw, str) and current and raw.strip() == _mask_proxy(current):
+            raw = current
+        if isinstance(raw, str) and "••••" in raw:
+            return jsonify({
+                "error": "proxy contains the masked placeholder — re-enter the "
+                         "full proxy URL (including credentials) to change it"
+            }), 400
+        proxy = _validate_proxy(raw)
         if proxy is None:
             return jsonify({"error": "invalid proxy URL"}), 400
         if proxy:
@@ -389,8 +528,8 @@ def api_proxy():
         else:
             for key in ("SPYGLASS_PROXY", "ALL_PROXY", "HTTP_PROXY", "HTTPS_PROXY"):
                 os.environ.pop(key, None)
-        return jsonify({"proxy": proxy, "status": "updated"})
-    return jsonify({"proxy": os.environ.get("SPYGLASS_PROXY", "")})
+        return jsonify({"proxy": _mask_proxy(proxy), "status": "updated"})
+    return jsonify({"proxy": _mask_proxy(os.environ.get("SPYGLASS_PROXY", ""))})
 
 
 @app.route("/api/spyglass/run")
@@ -644,6 +783,9 @@ def run():
         print("WARNING: binding to a non-loopback address without SPYGLASS_PRO_TOKEN — "
               "the dashboard and its scan engines are unauthenticated. "
               "Set SPYGLASS_PRO_TOKEN before exposing this server.")
+        print("         Without a token the Host allowlist stays in force, so "
+              "requests under this bind address need "
+              "SPYGLASS_PRO_ALLOWED_HOSTS=<hostname-or-ip>.")
     use_waitress = server == "waitress" or (server == "auto" and not debug)
     if use_waitress:
         try:

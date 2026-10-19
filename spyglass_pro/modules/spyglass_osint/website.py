@@ -492,7 +492,7 @@ def website(target, display=None):
 
 
 def _phase_dns(host):
-    """A/AAAA/... records, email security, wildcard DNS, zone transfer."""
+    """A/AAAA/... records, email security, wildcard DNS."""
     result = {}
     ips = set()
     dns = {}

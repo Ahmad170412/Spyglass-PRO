@@ -13,9 +13,10 @@ Two things do reach out over the network on your behalf, and both are worth
 knowing about:
 
 - **The social harness** drives a real browser against a real platform
-  (Instagram), using a burner session you supply. It never touches a
-  target's own infrastructure, but it does run automated collection against
-  a third party's service.
+  (Instagram) and queries public JSON APIs (GitHub, GitLab, Mastodon,
+  Bluesky), using a burner session you supply where one is needed. It never
+  touches a target's own infrastructure, but the browser-backed adapter does
+  run automated collection against a third party's service.
 - **Passive queries** go to third-party APIs, so the *target* of an
   investigation is disclosed to those services, and your source IP is
   visible to all of them. Use a proxy (`SPYGLASS_PROXY` or the dashboard's
@@ -52,8 +53,14 @@ credited in the advisory unless you'd rather stay anonymous.
 - Binds `127.0.0.1` by default and debug mode is off. Set
   `SPYGLASS_PRO_TOKEN` before binding any other address; the server warns
   at startup if you don't.
+- While no token is set, requests are answered only under a loopback `Host`
+  (or one in `SPYGLASS_PRO_ALLOWED_HOSTS`) — the DNS-rebinding defense — and
+  browser requests marked cross-site, or carrying a foreign `Origin`, are
+  refused. Responses carry a Content-Security-Policy and the usual framing/
+  sniffing headers.
 - `SPYGLASS_PRO_DEBUG=1` enables Werkzeug's interactive traceback console,
   which is arbitrary code execution. Never enable it on a reachable host.
 - Cases are encrypted at rest when `SPYGLASS_STORE_KEY` (base64 32-byte
   key) or `SPYGLASS_STORE_PASS` is set; otherwise they are plaintext under
-  `SPYGLASS_HOME` (default `~/.spyglass`).
+  `SPYGLASS_HOME` (default `~/.spyglass`). Both the result snapshot and the
+  entity index are encrypted.

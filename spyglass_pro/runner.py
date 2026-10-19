@@ -30,6 +30,7 @@ optional dependencies (phonenumbers, httpx, cloakbrowser) are missing.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import sys
@@ -475,7 +476,7 @@ MAX_TARGET_LEN = 254  # the DNS name limit, the longest of these shapes
 
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?"
 _DOMAIN_RE = re.compile(rf"^(?:{_LABEL}\.)+[A-Za-z]{{2,63}}$")
-_EMAIL_RE = re.compile(rf"^[A-Za-z0-9._%+-]+@{_LABEL}(?:\.{_LABEL})+$")
+_EMAIL_RE = re.compile(rf"^[A-Za-z0-9][A-Za-z0-9._%+-]*@{_LABEL}(?:\.{_LABEL})+$")
 _IPV4_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$")
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _SHELL_METACHARS = "<>\"'\\`;|&$(){}[]"
@@ -488,19 +489,45 @@ def _is_ipv4(value):
     return all(part.isdigit() and int(part) <= 255 for part in value.split("."))
 
 
+def _is_ip_literal(value):
+    """True for a well-formed IPv4 *or* IPv6 address (both families)."""
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def _looks_like_phone(value):
+    """A phone number: digits with the separators real formats use.
+
+    Accepts ``+1 415 555 0100`` and ``(415) 555-0100``. A leading ``-`` is
+    refused so a value can never read as an option flag once it reaches an
+    engine's argv, and anything with a letter (``1-800-FLOWERS``) is not a
+    phone number. The accepted characters are a strict subset of the digits,
+    one ``+`` and the punctuation below, so no shell metacharacter survives.
+    """
+    if value.startswith("-"):
+        return False
+    core = re.sub(r"[()\s.\-]", "", value)
+    if core.startswith("+"):
+        core = core[1:]
+    return core.isdigit() and 5 <= len(core) <= 15
+
+
 def _is_identifier(value):
     """Email, phone (incl. international formats) or domain-shaped input."""
     if not value or len(value) > MAX_TARGET_LEN:
         return False
+    # Checked before the metacharacter gate: real phone formats use space,
+    # parens and hyphen, which the gate would otherwise reject.
+    if _looks_like_phone(value):
+        return True
     if " " in value or any(ch in value for ch in _SHELL_METACHARS):
         return False
     if "@" in value:
         return bool(_EMAIL_RE.match(value))
     if _is_ipv4(value):
-        return True
-    # A phone number: digits, spaces, and the punctuation real formats use.
-    digits = value.lstrip("+").replace(" ", "").replace("-", "")
-    if digits.isdigit() and 5 <= len(digits) <= 15:
         return True
     return bool(_DOMAIN_RE.match(value))
 
@@ -536,7 +563,7 @@ def _validate_target(module, target):
                 f"maximum {MAX_TARGET_LEN})")
 
     if module == "ip":
-        if not (_is_ipv4(target) or ":" in target):
+        if not _is_ip_literal(target):
             return f"ip: {target!r} is not an IP address"
         return None
 

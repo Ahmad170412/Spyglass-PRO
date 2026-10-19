@@ -1,0 +1,76 @@
+name: Release
+
+# Cut a release by pushing a version tag, e.g.:
+#   git tag -a v1.1.0 -m "Spyglass-Pro 1.1.0" && git push origin v1.1.0
+# The tag must match spyglass_pro/version.py / pyproject.toml (test_version.py
+# pins those two together; keep the tag in step with them by hand).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --upgrade pip build
+      - run: python -m build
+      - name: Assert the wheel carries LICENSE, NOTICE and the vendored engines
+        # Same contract the CI `package` job enforces — a wheel that installs
+        # but is missing these fails at runtime, so it must never publish.
+        run: |
+          set -euo pipefail
+          whl=$(ls dist/*.whl)
+          unzip -l "$whl" > wheel-listing.txt
+          unzip -p "$whl" "*/METADATA" > wheel-metadata.txt
+          grep -q "licenses/LICENSE" wheel-listing.txt
+          grep -q "licenses/NOTICE" wheel-listing.txt
+          grep -q "^License-Expression: MIT" wheel-metadata.txt
+          for pkg in spyglass_osint instacloak lens_extender; do
+            grep -q "spyglass_pro/modules/$pkg/__init__.py" wheel-listing.txt \
+              || { echo "MISSING vendored package: $pkg"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-pypi:
+    name: publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # PyPI trusted publishing (OIDC): configure this environment as a
+    # trusted publisher on pypi.org — no API token secret required.
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

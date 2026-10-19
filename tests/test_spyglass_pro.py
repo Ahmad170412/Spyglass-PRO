@@ -10,6 +10,7 @@ store, no network, no browser.
 """
 
 import contextlib
+import json
 import os
 import pathlib
 import tempfile
@@ -20,7 +21,7 @@ from unittest import mock
 import helpers  # noqa: F401  — puts spyglass_pro/modules on sys.path
 
 from spyglass_pro import runner
-from spyglass_pro.app import _validate_proxy, app, bind_config
+from spyglass_pro.app import _mask_proxy, _validate_proxy, app, bind_config
 
 
 class ProxyValidationTest(unittest.TestCase):
@@ -188,6 +189,16 @@ class TargetValidationTest(unittest.TestCase):
         self.assertIsNone(runner._validate_target("ip", "8.8.8.8"))
         self.assertIsNone(runner._validate_target("ip", "2001:4860:4860::8888"))
 
+    def test_ip_module_accepts_ipv6_literals(self):
+        for good in ("::1", "2001:4860:4860::8888", "fe80::abcd"):
+            self.assertIsNone(runner._validate_target("ip", good), good)
+
+    def test_ip_module_rejects_malformed_ipv6(self):
+        # A colon used to be sufficient ("gggg::1" was accepted and then
+        # always failed at resolve time); only a real address passes now.
+        for junk in (":", "2001:db8:::1", "12345::", "gggg::1", "::gggg"):
+            self.assertIsNotNone(runner._validate_target("ip", junk), junk)
+
     def test_legitimate_targets_are_accepted(self):
         """The gate must not break real recon input."""
         valid = [
@@ -213,6 +224,24 @@ class TargetValidationTest(unittest.TestCase):
             result = runner.run_spyglass("website", "a" * 700, {})
         self.assertIn("error", result)
         self.assertNotIn(runner.REJECTED_KEY, result)
+
+
+class IdentifierValidationTest(unittest.TestCase):
+    """Real phone formats reach the engine; leading-dash input never does."""
+
+    def test_phone_formats_with_separators_are_accepted(self):
+        for target in ("+1 415 555 0100", "(415) 555-0100",
+                       "415.555.0100", "555-123-4567"):
+            self.assertIsNone(runner._validate_target("phone", target), target)
+
+    def test_leading_dash_is_rejected_for_phone_and_email(self):
+        # A leading '-' could read as an option flag once it lands in argv.
+        for module, target in (("phone", "-1234567"), ("email", "-a@b.com")):
+            self.assertIsNotNone(runner._validate_target(module, target), target)
+
+    def test_letters_are_not_a_phone_number(self):
+        for junk in ("1-800-FLOWERS", "call-me", "12345x"):
+            self.assertIsNotNone(runner._validate_target("phone", junk), junk)
 
 
 class QueueRejectionHttpTest(unittest.TestCase):
@@ -763,6 +792,137 @@ class SocialStoreTest(unittest.TestCase):
             result = runner.run_social("mastodon", "nobody", {"store": "1"})
         self.assertNotIn("stored_run_id", result)
         self.assertEqual(runner.list_cases(), [])
+
+
+class RequestOriginGateTest(unittest.TestCase):
+    """The default install has no token, so request origin must be pinned.
+
+    DNS rebinding points an attacker domain at 127.0.0.1: the rebound request
+    carries that domain as Host and reads as same-origin to the attacker's
+    page. Without a Host allowlist it read the whole API. Cross-site requests
+    are refused separately (Origin / Sec-Fetch-Site); a non-browser client
+    sends neither header and is unaffected.
+    """
+
+    def setUp(self):
+        self.client = app.test_client()
+
+    def test_loopback_hosts_are_allowed(self):
+        with mock.patch.dict(os.environ, {"SPYGLASS_PRO_TOKEN": ""}):
+            for host in ("127.0.0.1", "localhost", "127.0.0.1:5000", "[::1]:5000"):
+                self.assertEqual(
+                    self.client.get("/api/status", headers={"Host": host}).status_code,
+                    200, host)
+
+    def test_foreign_host_is_rejected_without_a_token(self):
+        with mock.patch.dict(os.environ, {"SPYGLASS_PRO_TOKEN": ""}):
+            resp = self.client.get("/api/status", headers={"Host": "attacker.example"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_allowlist_permits_a_real_hostname(self):
+        with mock.patch.dict(os.environ, {
+                "SPYGLASS_PRO_TOKEN": "",
+                "SPYGLASS_PRO_ALLOWED_HOSTS": "recon.internal,10.0.0.5:5000"}):
+            for host in ("recon.internal", "10.0.0.5:5000"):
+                self.assertEqual(
+                    self.client.get("/api/status", headers={"Host": host}).status_code,
+                    200, host)
+
+    def test_token_makes_the_host_check_unnecessary(self):
+        with mock.patch.dict(os.environ, {"SPYGLASS_PRO_TOKEN": "s3cret"}):
+            resp = self.client.get("/api/status",
+                                   headers={"Host": "proxied.example",
+                                            "Authorization": "Bearer s3cret"})
+        self.assertEqual(resp.status_code, 200)
+
+    def test_cross_site_request_is_refused(self):
+        resp = self.client.get("/api/status", headers={"Sec-Fetch-Site": "cross-site"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_cross_origin_request_is_refused(self):
+        resp = self.client.get("/api/status", headers={"Origin": "https://evil.example"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_null_origin_is_refused(self):
+        resp = self.client.get("/api/status", headers={"Origin": "null"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_same_origin_request_is_allowed(self):
+        resp = self.client.get("/api/status", headers={
+            "Origin": "http://localhost", "Sec-Fetch-Site": "same-origin"})
+        self.assertEqual(resp.status_code, 200)
+
+    def test_scripted_client_without_browser_headers_is_unaffected(self):
+        with mock.patch.dict(os.environ, {"SPYGLASS_PRO_TOKEN": ""}):
+            self.assertEqual(self.client.get("/api/status").status_code, 200)
+
+
+class ProxyMaskingTest(unittest.TestCase):
+    """A proxy credential must never be echoed back by any endpoint."""
+
+    CREDS = "http://alice:s3cr3t@127.0.0.1:8080"
+
+    def setUp(self):
+        self.client = app.test_client()
+        self._store = mock.patch("spyglass_pro.app._settings_store", return_value=None)
+        self._store.start()
+        self.addCleanup(self._store.stop)
+
+    def test_mask_hides_only_the_credentials(self):
+        self.assertEqual(_mask_proxy(self.CREDS), "http://••••@127.0.0.1:8080")
+        self.assertEqual(_mask_proxy("socks5://127.0.0.1:9050"),
+                         "socks5://127.0.0.1:9050")
+        self.assertEqual(_mask_proxy(""), "")
+
+    def test_status_never_echoes_the_credential(self):
+        with mock.patch.dict(os.environ, {"SPYGLASS_PROXY": self.CREDS}):
+            body = self.client.get("/api/status").get_json()
+        self.assertNotIn("s3cr3t", json.dumps(body, default=str))
+        self.assertEqual(body["proxy"], "http://••••@127.0.0.1:8080")
+
+    def test_settings_snapshot_masks_the_proxy(self):
+        with mock.patch.dict(os.environ, {"SPYGLASS_PROXY": self.CREDS}):
+            body = self.client.get("/api/settings").get_json()
+        self.assertNotIn("s3cr3t", json.dumps(body, default=str))
+
+    def test_proxy_get_masks_the_credential(self):
+        with mock.patch.dict(os.environ, {"SPYGLASS_PROXY": self.CREDS}):
+            body = self.client.get("/api/proxy").get_json()
+        self.assertNotIn("s3cr3t", json.dumps(body, default=str))
+
+    def test_untouched_masked_field_keeps_the_proxy(self):
+        with mock.patch.dict(os.environ, {"SPYGLASS_PROXY": self.CREDS}):
+            resp = self.client.post("/api/settings",
+                                    json={"proxy": _mask_proxy(self.CREDS)})
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(os.environ["SPYGLASS_PROXY"], self.CREDS)
+
+    def test_editing_a_masked_value_is_rejected(self):
+        with mock.patch.dict(os.environ, {"SPYGLASS_PROXY": self.CREDS}):
+            resp = self.client.post("/api/settings",
+                                    json={"proxy": "http://••••@newhost:8080"})
+        self.assertEqual(resp.status_code, 400)
+
+
+class SecurityHeaderTest(unittest.TestCase):
+    """The dashboard ships baseline browser hardening on every response."""
+
+    def setUp(self):
+        self.client = app.test_client()
+
+    def test_shell_carries_the_hardening_headers(self):
+        resp = self.client.get("/")
+        self.assertEqual(resp.headers.get("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(resp.headers.get("X-Frame-Options"), "DENY")
+        self.assertEqual(resp.headers.get("Referrer-Policy"), "no-referrer")
+        csp = resp.headers.get("Content-Security-Policy") or ""
+        self.assertIn("frame-ancestors 'none'", csp)
+        self.assertIn("script-src 'self'", csp)
+        self.assertNotIn("'unsafe-eval'", csp)
+
+    def test_api_responses_carry_them_too(self):
+        resp = self.client.get("/api/status")
+        self.assertEqual(resp.headers.get("X-Frame-Options"), "DENY")
 
 
 if __name__ == "__main__":

@@ -82,5 +82,65 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(store._entities({"platform": "mastodon"}, "social_mastodon"), [])
 
 
+@unittest.skipUnless(store._CRYPTO_AVAILABLE, "cryptography not installed")
+class EntityEncryptionTest(unittest.TestCase):
+    """The entity index must be encrypted at rest, like the result blob.
+
+    The index holds the same identifiers (domains, IPs, emails) as the
+    result JSON; storing it in cleartext next to a Fernet ciphertext blob
+    defeated the encryption the store advertises. This pins the raw bytes.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        from cryptography.fernet import Fernet
+        patcher = mock.patch.dict(os.environ, {
+            "SPYGLASS_HOME": self.tmp.name,
+            "SPYGLASS_STORE_KEY": Fernet.generate_key().decode(),
+        })
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _raw_db_bytes(self):
+        # WAL may still hold the rows until the connection closes; read the
+        # main file and any -wal/-shm so the assertion cannot pass by accident.
+        blob = b""
+        for name in os.listdir(self.tmp.name):
+            if name.startswith("spyglass.db"):
+                with open(os.path.join(self.tmp.name, name), "rb") as fh:
+                    blob += fh.read()
+        return blob
+
+    def test_entity_values_are_not_written_in_cleartext(self):
+        store.store_result(_website_result(["1.2.3.4"], ["secret.x.com"]), "website", "x.com")
+        raw = self._raw_db_bytes()
+        for needle in (b"secret.x.com", b"1.2.3.4", b"a@acme.com"):
+            self.assertNotIn(needle, raw, needle)
+
+    def test_diff_and_timeline_still_read_decrypted(self):
+        store.store_result(_website_result(["1.2.3.4"], ["www.x.com"]), "website", "x.com")
+        store.store_result(_website_result(["1.2.3.4", "5.6.7.8"], ["www.x.com"]), "website", "x.com")
+        d = store.diff("x.com", "website")
+        self.assertIn("ip:5.6.7.8", d["added"])
+        rows = store.timeline("x.com", "website")
+        self.assertIn("domain:www.x.com", rows[0]["entities"])
+
+    def test_legacy_cleartext_rows_still_read(self):
+        """A store written before this change (plaintext entities) must not
+        turn into ciphertext-looking blobs once a key is configured."""
+        store.store_result(_website_result(["1.2.3.4"], ["www.x.com"]), "website", "x.com")
+        db = store._connect()
+        try:
+            # Simulate a legacy row: overwrite one entity with its cleartext.
+            db.execute("UPDATE entities SET value=? WHERE kind='domain'", ("www.x.com",))
+            db.commit()
+            ents = store._entity_set(db, db.execute(
+                "SELECT id FROM runs LIMIT 1").fetchone()["id"])
+        finally:
+            db.close()
+        self.assertIn("domain:www.x.com", ents)
+
+
 if __name__ == "__main__":
     unittest.main()

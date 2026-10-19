@@ -6,6 +6,7 @@ to run on every call was removed rather than switched off, so nothing here
 opens a connection to the host.
 """
 
+import ipaddress
 import re
 import socket
 
@@ -50,17 +51,28 @@ def _is_domain(s):
     return not s.replace(".", "").isdigit() and ":" not in s
 
 
+def _is_ip_literal(s):
+    """True for a well-formed IPv4 *or* IPv6 address (both families)."""
+    try:
+        ipaddress.ip_address(s)
+        return True
+    except ValueError:
+        return False
+
+
 def _resolve(target):
+    # Check for a literal first: ``inet_aton`` and ``_is_domain`` are both
+    # IPv4-only, so an IPv6 target ("::1", "2001:db8::1") fell through every
+    # branch and was reported as unresolvable. The ip module accepts IPv6, so
+    # it has to resolve it.
+    if _is_ip_literal(target):
+        return str(ipaddress.ip_address(target))
     if _is_domain(target):
         try:
             return socket.gethostbyname(target)
         except socket.gaierror:
             return None
-    try:
-        socket.inet_aton(target)
-        return target
-    except socket.error:
-        return None
+    return None
 
 
 def _reverse_dns(ip):

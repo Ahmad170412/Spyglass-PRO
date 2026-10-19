@@ -48,8 +48,9 @@ pinned by a check.
 
 ## Adding a social platform
 
-The social harness is registry-driven. Instagram is the only adapter today; a
-new one is a new module plus a `@register` line.
+The social harness is registry-driven. The bundled adapters are Instagram
+(stealth browser) plus the keyless JSON sources GitHub, GitLab, Keybase,
+Mastodon and Bluesky; a new one is a new module plus a `@register` line.
 
 ```python
 # spyglass_pro/social/platforms/<name>.py
@@ -108,7 +109,8 @@ directory boundary on purpose:
   records the reason a decision was made is the most valuable thing in the
   file.
 - Prefer editing an existing file over creating a new one.
-- `mypy` is configured but not yet clean; it is not in CI.
+- `mypy spyglass_pro` must stay clean (it is, and the CI `types` job enforces
+  it) — config in `pyproject.toml`.
 
 ## Honest reporting is a feature
 
