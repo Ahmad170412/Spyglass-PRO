@@ -1,0 +1,21 @@
+# Files a *source distribution* should carry that the wheel does not.
+#
+# The wheel is governed by [tool.setuptools.packages.find] + package-data in
+# pyproject.toml and needs only the importable package. Without this file the
+# sdist that `python -m build` produces is the same subset, so it is missing the
+# dev entry point, the CLI-engine installer, the test suite and the docs the
+# README links to — a "source" distribution that cannot run `run.py` or the
+# installer, and cannot be tested. These are top-level paths, not packages, so
+# none of them leaks into the wheel.
+include run.py
+include requirements.txt
+include CHANGELOG.md
+include CONTRIBUTING.md
+include AUDIT-2026-10.md
+recursive-include scripts *.py
+recursive-include tests *.py *.js
+recursive-include docs *
+recursive-include assets *
+
+# LICENSE and NOTICE ship via `license-files` in pyproject.toml (PEP 639), so
+# they are deliberately not repeated here.

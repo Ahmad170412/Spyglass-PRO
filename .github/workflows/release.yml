@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install --upgrade pip build
+      - run: pip install --upgrade pip build twine
       - run: python -m build
       - name: Assert the wheel carries LICENSE, NOTICE and the vendored engines
         # Same contract the CI `package` job enforces — a wheel that installs
@@ -38,6 +38,11 @@ jobs:
             grep -q "spyglass_pro/modules/$pkg/__init__.py" wheel-listing.txt \
               || { echo "MISSING vendored package: $pkg"; exit 1; }
           done
+      - name: twine check — the long description must render on PyPI
+        # readme_renderer validates README.md the way PyPI will. A description
+        # that fails here is rejected or renders broken on the project page, so
+        # this gates the publish instead of discovering it after the fact.
+        run: twine check dist/*
       - uses: actions/upload-artifact@v4
         with:
           name: dist
