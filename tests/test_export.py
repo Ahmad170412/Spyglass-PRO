@@ -35,7 +35,7 @@ class WriteTest(unittest.TestCase):
                 path = export.json_output({"a": 1}, "u@x.com/y", "email")
                 self.assertTrue(path.endswith(".json"))
                 self.assertIn("spyglass_email_u_x.com_y_", path)
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     self.assertEqual(json.load(f), {"a": 1})
             finally:
                 os.chdir(old)
@@ -48,7 +48,7 @@ class WriteTest(unittest.TestCase):
                 path = export.csv_output({"a": {"b": 1}}, "example.com/x", "website")
                 self.assertTrue(path.endswith(".csv"))
                 self.assertIn("spyglass_website_example.com_x_", path)
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     content = f.read()
                 self.assertIn("a_b", content)
                 self.assertIn("1", content)
@@ -69,7 +69,7 @@ class WriteTest(unittest.TestCase):
             os.chdir(tmp)
             try:
                 path = export.csv_output(result, "example.com", "website")
-                with open(path, newline="") as f:
+                with open(path, newline="", encoding="utf-8") as f:
                     reader = csv.DictReader(f)
                     rows = list(reader)
                     self.assertEqual(len(rows), 4)

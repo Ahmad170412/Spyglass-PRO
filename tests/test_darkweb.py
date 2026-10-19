@@ -280,7 +280,7 @@ class DarkwebReportExportTest(unittest.TestCase):
         exp = imp("export")
         path = exp.json_output(self.RESULT, "user@example.com", "darkweb")
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             self.assertEqual(data["ahmia"][0]["url"], "http://abc.onion")
         finally:

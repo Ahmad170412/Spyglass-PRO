@@ -72,7 +72,7 @@ class FrontendSchemaMirrorTest(unittest.TestCase):
     """
 
     def _js_fields(self):
-        source = _APP_JS.read_text()
+        source = _APP_JS.read_text(encoding="utf-8")
         block = re.search(r"var SOCIAL_FIELDS = \[(?P<body>.*?)\];", source, re.S)
         self.assertIsNotNone(block, "SOCIAL_FIELDS not found in app.js — renamed?")
         return [(m.group("key"), m.group("label"), m.group("type"))
@@ -1188,7 +1188,7 @@ class ReportTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = report.write(self._result(), tmp, "example.md")
             self.assertTrue(Path(path).is_file())
-            self.assertIn("Instagram Recon", Path(path).read_text())
+            self.assertIn("Instagram Recon", Path(path).read_text(encoding="utf-8"))
 
     def test_summary_is_one_line(self):
         line = report.summary(self._result())

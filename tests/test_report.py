@@ -91,7 +91,7 @@ class WriteReportTest(unittest.TestCase):
             path = report.write_report({"a": 1}, "ip", "1.2.3.4:80", tmp)
             self.assertTrue(os.path.isfile(path))
             self.assertTrue(os.path.basename(path).startswith("spyglass_report_ip_1.2.3.4_80_"))
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 self.assertIn("# Spyglass Report — ip", f.read())
 
     def test_render_reports_version(self):

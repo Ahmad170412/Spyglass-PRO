@@ -434,7 +434,7 @@ class StoredRunFeedbackTest(unittest.TestCase):
     def test_investigation_honours_export_flags(self):
         from spyglass_osint import investigation
         # export.* writes into the working directory — keep that out of the repo.
-        with tempfile.TemporaryDirectory() as workdir, \
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as workdir, \
              mock.patch.dict(os.environ, {"SPYGLASS_HOME": self._tmp.name}), \
              mock.patch("os.getcwd", return_value=workdir), \
              _chdir(workdir), \

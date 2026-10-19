@@ -666,7 +666,7 @@ def _run_single(target: str, options: dict) -> dict:
 
 def _run_batch(batch_file: str, options: dict) -> None:
     try:
-        with open(batch_file, "r") as fh:
+        with open(batch_file, "r", encoding="utf-8") as fh:
             targets = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
     except OSError as exc:
         console.print(f"[red]Failed to read batch file:[/] {exc}")

@@ -182,7 +182,10 @@ class ToolOutputDecodingTest(unittest.TestCase):
         self.assertIn("bad", r.stdout)
 
     def test_unicode_round_trips_through_the_run_helper(self):
-        out = utils._run([sys.executable, "-c", "print('\\u00e9\\u00e8')"])
+        out = utils._run(
+            [sys.executable, "-c",
+             "import sys; sys.stdout.buffer.write('\\u00e9\\u00e8'.encode('utf-8'))"]
+        )
         self.assertEqual(out, "éè")
 
 
