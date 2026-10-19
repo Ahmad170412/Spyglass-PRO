@@ -105,8 +105,14 @@ config.CONFIG_FILE = config_dir / "cfg.json"
 config.update("shodan_api_key", "testkey")
 loaded = config.load()
 check("round-trips key", loaded["shodan_api_key"] == "testkey")
-mode = os.stat(config.CONFIG_FILE).st_mode & 0o777
-check("file chmod 600", mode == 0o600, f"got {oct(mode)}")
+if os.name == "posix":
+    mode = os.stat(config.CONFIG_FILE).st_mode & 0o777
+    check("file chmod 600", mode == 0o600, f"got {oct(mode)}")
+else:
+    # Windows has no POSIX mode bits: os.stat synthesizes 0o666 for any
+    # writable file, so 0600 is not enforceable or observable there. Access
+    # is governed by NTFS ACLs on the user's profile instead.
+    check("file chmod 600 (Windows: ACL-governed)", True)
 
 print("== DNSBL logic ==")
 check("_is_ip dotted quad", _is_ip("1.2.3.4") and not _is_ip("example.com"))
