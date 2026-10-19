@@ -1,6 +1,6 @@
 <div align="center" markdown="1">
 
-<img src="https://raw.githubusercontent.com/Ahmad170412/Spyglass-Pro/main/assets/logo.svg" alt="Spyglass-Pro logo" width="320"/>
+<img src="https://raw.githubusercontent.com/Ahmad170412/Spyglass-PRO/main/assets/logo.svg" alt="Spyglass-Pro logo" width="320"/>
 
 # Spyglass-Pro
 
@@ -9,18 +9,18 @@
 [![CI](https://github.com/Ahmad170412/Spyglass-PRO/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmad170412/Spyglass-PRO/actions)
 [![Release](https://img.shields.io/github/v/release/Ahmad170412/Spyglass-PRO?color=6366f1&label=release)](https://github.com/Ahmad170412/Spyglass-PRO/releases)
 [![PyPI version](https://img.shields.io/pypi/v/spyglass-pro.svg)](https://pypi.org/project/spyglass-pro/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-06b6d4.svg)](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-06b6d4.svg)](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![Passive only](https://img.shields.io/badge/recon-passive--only-6366f1?logo=shield&logoColor=white)](#passive-only)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/CONTRIBUTING.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CONTRIBUTING.md)
 
-[**Quick Start**](#quick-start) · [**Features**](#features) · [**Architecture**](#architecture) · [**Configuration**](#configuration) · [**API**](#api) · [**Changes**](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/CHANGELOG.md) · [**Contributing**](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/CONTRIBUTING.md) · [**Security**](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/.github/SECURITY.md) · [**Audit**](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/AUDIT-2026-10.md)
+[**Quick Start**](#quick-start) · [**Features**](#features) · [**Architecture**](#architecture) · [**Configuration**](#configuration) · [**API**](#api) · [**Changes**](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CHANGELOG.md) · [**Contributing**](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CONTRIBUTING.md) · [**Security**](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/.github/SECURITY.md) · [**Audit**](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/AUDIT-2026-10.md)
 
 </div>
 
 ---
 
-![Spyglass-Pro overview — stat cards and the per-module data-source grid](https://raw.githubusercontent.com/Ahmad170412/Spyglass-Pro/main/docs/screenshots/dashboard-overview.png)
+![Spyglass-Pro overview — stat cards and the per-module data-source grid](https://raw.githubusercontent.com/Ahmad170412/Spyglass-PRO/main/docs/screenshots/dashboard-overview.png)
 
 ## Why Spyglass-Pro?
 
@@ -34,7 +34,7 @@ a target, and how do I know the answer is real?**
   parallel and correlates the entities they each find.
 - **Passive by construction, not by policy.** Every probe that touched a
   target was *deleted*, not disabled — no flag, env var or config path brings
-  it back. The [audit](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/AUDIT-2026-10.md#active-scanning-removed) lists every
+  it back. The [audit](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/AUDIT-2026-10.md#active-scanning-removed) lists every
   one so it can't quietly reappear.
 - **It refuses to lie to you.** A follower list behind a login is reported as
   *walled with a reason*, never as an empty list. A recon leg that can't run
@@ -65,7 +65,7 @@ a target, and how do I know the answer is real?**
 - [Platforms](#platforms)
 - [Project structure](#project-structure)
 - [Contributing](#contributing)
-- [Changelog](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/CHANGELOG.md)
+- [Changelog](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CHANGELOG.md)
 - [Responsible use](#responsible-use)
 - [License](#license)
 
@@ -75,7 +75,7 @@ a target, and how do I know the answer is real?**
 
 1.1 is a hardening release: three new **keyless** social sources, a security
 pass over the seams between versions, and honest answers where 1.0 was thin.
-The full list is in the [changelog](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/CHANGELOG.md).
+The full list is in the [changelog](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CHANGELOG.md).
 
 - **Keybase** joins the social panel — keyless, and the strongest correlation
   source in the tree: it returns the account's cryptographically-**proven**
@@ -294,7 +294,7 @@ enrichment are wired but need an API key.
 There is no port scan, no directory brute force, no HTTP probing of discovered
 hosts, no zone-transfer attempt and not even a fetch of the target's homepage.
 That code was **removed, not disabled** — the
-[audit inventory](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/AUDIT-2026-10.md#active-scanning-removed) lists every
+[audit inventory](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/AUDIT-2026-10.md#active-scanning-removed) lists every
 removed function, so none of it can be switched back on by configuration or a
 stray flag.
 
@@ -472,7 +472,7 @@ from its origin — including the bug fixes that exist only here.
 
 ## Contributing
 
-Read [CONTRIBUTING.md](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/CONTRIBUTING.md). The short version: **the passive-only
+Read [CONTRIBUTING.md](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CONTRIBUTING.md). The short version: **the passive-only
 rule overrides everything else**, new behaviour needs a test that fails without
 it, and a partial result must never look like a complete one.
 
@@ -496,7 +496,7 @@ You are responsible for compliance with applicable laws.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/LICENSE). One copyright holder covers this repository in
-full, including the engines under `spyglass_pro/modules/`; [NOTICE](https://github.com/Ahmad170412/Spyglass-Pro/blob/main/NOTICE)
+MIT — see [LICENSE](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/LICENSE). One copyright holder covers this repository in
+full, including the engines under `spyglass_pro/modules/`; [NOTICE](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/NOTICE)
 records where those came from and why they are kept behind a directory
 boundary.
