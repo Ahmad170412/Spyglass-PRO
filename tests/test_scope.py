@@ -1,10 +1,12 @@
-"""Pins the 1.3 exposure boundary.
+"""Pins the exposure boundary.
 
-1.3 unexposes the IP module, the heavy website phases and Lens-Extender
-without deleting them. This suite is the guard on that promise:
+This build unexposes the IP module, the heavy website phases and
+Lens-Extender without deleting them. This suite is the guard on that
+promise:
 
 * the product vocabulary and the dormant set cannot overlap;
-* every exposed module still has a dispatch handler;
+* the handler map is exactly the exposed set plus the dormant set — a
+  new engine cannot become reachable without a scope decision;
 * the dormant code still imports (the sibling tool depends on it);
 * the HTTP boundary refuses dormant work with honest, named errors.
 
@@ -13,6 +15,7 @@ reach it, not that the library lost the function.
 """
 
 import unittest
+from unittest import mock
 
 import helpers  # noqa: F401  — puts spyglass_pro/modules on sys.path
 
@@ -27,6 +30,15 @@ class VocabularyTest(unittest.TestCase):
     def test_every_exposed_module_has_a_handler(self):
         missing = set(scope.EXPOSED_MODULES) - set(runner._SPYGLASS_HANDLERS)
         self.assertEqual(missing, set())
+
+    def test_handler_map_is_exposed_plus_dormant(self):
+        """The scope list is the allowlist, not a comment.
+
+        A handler that appears in the runner without a scope decision would
+        otherwise be reachable over HTTP the moment it landed.
+        """
+        self.assertEqual(set(runner._SPYGLASS_HANDLERS),
+                         set(scope.EXPOSED_MODULES) | set(scope.DORMANT_MODULES))
 
     def test_dormant_modules_are_still_in_the_handler_map(self):
         """Unexposed is not deleted: the vendored engine stays callable."""
@@ -77,6 +89,14 @@ class ApiBoundaryTest(unittest.TestCase):
 
     def test_unknown_module_is_not_mislabelled_dormant(self):
         resp = self.client.get("/api/spyglass/run?module=evil&target=x")
+        self.assertIn("unknown module", resp.get_json()["error"])
+
+    def test_handler_without_a_scope_decision_is_refused(self):
+        """A new engine is unreachable until the scope list names it."""
+        with mock.patch.dict(runner._SPYGLASS_HANDLERS,
+                             {"ghost": lambda t, f, p: {"ran": True}}):
+            resp = self.client.get("/api/spyglass/run?module=ghost&target=x")
+        self.assertEqual(resp.status_code, 400)
         self.assertIn("unknown module", resp.get_json()["error"])
 
 

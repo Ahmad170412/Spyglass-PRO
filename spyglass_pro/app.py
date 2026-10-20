@@ -396,27 +396,22 @@ def _degraded(tools):
 
 # ─── API key settings (vault) ───────────────────────────────────
 #
-# Lens-Extender reads ~/.lens-extender/config.json; dark-web keyed layers
-# read INTELX_API_KEY / HIBP_API_KEY from the environment. The dashboard
-# edits both through one endpoint so operators never hand-edit files.
-# GET masks values (configured + last-4 hint only); POST writes non-empty
-# values and clears on empty string. Keys at rest keep 0600 via le_config.
+# The dark-web keyed layers read INTELX_API_KEY / HIBP_API_KEY from the
+# environment. The dashboard edits them through one endpoint so operators
+# never hand-edit files. GET masks values (configured + last-4 hint only);
+# POST writes non-empty values and clears on empty string.
+#
+# Storage lives in spyglass_pro.vault (~/.spyglass/vault.json, 0600 on
+# POSIX). It used to live in the vendored Lens engine's config file; that
+# coupling would have broken Settings the day Lens is cut out, so the vault
+# owns its file and imports the old values once.
+#
+# Only the keys an exposed module actually reads are offered here. The
+# dormant IP/Lens infrastructure had its own keys (Shodan, VirusTotal,
+# AbuseIPDB, Censys, GreyNoise, NVD); they stayed in the legacy config
+# file and are not part of this build's Settings surface.
 
 _SETTINGS_SPEC = [
-    {"key": "shodan_api_key", "label": "Shodan", "env": "SHODAN_API_KEY",
-     "help": "IP host data, open ports, org/ISP"},
-    {"key": "virustotal_api_key", "label": "VirusTotal", "env": "VIRUSTOTAL_API_KEY",
-     "help": "IP reputation, malicious votes"},
-    {"key": "abuseipdb_api_key", "label": "AbuseIPDB", "env": "ABUSEIPDB_API_KEY",
-     "help": "Abuse confidence score"},
-    {"key": "censys_api_id", "label": "Censys ID", "env": "CENSYS_API_ID",
-     "help": "Censys Search API identifier"},
-    {"key": "censys_api_key", "label": "Censys Secret", "env": "CENSYS_API_KEY",
-     "help": "Censys Search API secret"},
-    {"key": "greynoise_api_key", "label": "GreyNoise", "env": "GREYNOISE_API_KEY",
-     "help": "Internet-noise classification"},
-    {"key": "nvd_api_key", "label": "NVD", "env": "NVD_API_KEY",
-     "help": "CVE enrichment, higher rate limit"},
     {"key": "intelx_api_key", "label": "IntelX", "env": "INTELX_API_KEY",
      "help": "Breach + paste archive search"},
     {"key": "hibp_api_key", "label": "HIBP", "env": "HIBP_API_KEY",
@@ -425,9 +420,15 @@ _SETTINGS_SPEC = [
 
 
 def _settings_store():
+    """The storage backend for Settings.
+
+    A module with ``load()``/``save()``. Returning None means "no
+    persistence available" — the endpoints then keep working against
+    environment variables only, which is what a read-only home does.
+    """
     try:
-        from lens_extender import config as le_config
-        return le_config
+        from . import vault
+        return vault
     except ImportError:
         return None
 
@@ -484,7 +485,8 @@ def api_settings_save():
         else:
             for k in ("SPYGLASS_PROXY", "ALL_PROXY", "HTTP_PROXY", "HTTPS_PROXY"):
                 os.environ.pop(k, None)
-        # Persist for lens recon too.
+        # The proxy is stored next to the API keys so one file holds every
+        # outbound credential the dashboard owns.
         cfg["proxy"] = proxy
         cfg["socks_proxy"] = proxy
     updated, cleared = [], []
@@ -547,6 +549,14 @@ def api_spyglass_run():
     # the reason instead of a bare 404.
     if scope.is_dormant_module(module):
         return jsonify({"error": scope.dormant_error("module", module)}), 400
+    # The scope list is the allowlist, not a comment: anything the runner
+    # knows but this build does not expose is refused here. Without this a
+    # new handler added to runner._SPYGLASS_HANDLERS would silently become
+    # reachable over HTTP the moment it landed.
+    if not scope.is_exposed_module(module):
+        return jsonify({
+            "error": f"unknown module: {module!r} — not part of this build"
+        }), 400
     target = request.args.get("target", "")
     flags = {key: value for key, value in request.args.items()
              if key not in ("module", "target", "async")}

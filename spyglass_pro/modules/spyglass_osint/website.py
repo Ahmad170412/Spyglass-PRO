@@ -46,7 +46,6 @@ import json
 import os
 import re
 import socket
-import subprocess
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -83,50 +82,6 @@ def _reset_caches():
     _DIG_CACHE.clear()
     _BODY_CACHE.clear()
 
-# A larger bundled subdomain list than the original ~100 names. A SecLists
-# checkout on disk wins when present; otherwise this stays the fallback.
-_SUB_LIST = [
-    "www", "mail", "email", "smtp", "imap", "pop", "pop3", "webmail",
-    "mx", "mx1", "mx2", "mx3", "ns", "ns1", "ns2", "ns3", "ns4",
-    "dns", "dns1", "dns2", "dns3", "dns4", "ftp", "sftp", "ssh",
-    "git", "gitlab", "github", "svn", "cvs", "vpn", "vpn1", "vpn2",
-    "remote", "secure", "login", "sso", "id", "oauth", "auth", "signin",
-    "signup", "register", "account", "accounts", "admin", "administrator",
-    "adm", "panel", "control", "manage", "management", "dashboard",
-    "cpanel", "webmail2", "mail2", "smtp2", "relay", "gateway", "portal",
-    "my", "apps", "app", "api", "api1", "api2", "api3", "dev",
-    "developer", "developers", "dev1", "dev2", "stage", "staging", "test",
-    "test1", "test2", "testing", "qa", "uat", "beta", "alpha", "demo",
-    "sandbox", "preview", "review", "canary", "prod", "production", "www1",
-    "www2", "www3", "www4", "web", "web1", "web2", "web3", "static",
-    "static1", "static2", "assets", "assets1", "cdn", "cdn1", "cdn2",
-    "cdn3", "img", "images", "image", "media", "video", "videos", "audio",
-    "download", "downloads", "dl", "files", "file", "upload", "uploads",
-    "docs", "documentation", "doc", "support", "help", "helpdesk", "status",
-    "health", "check", "monitor", "monitoring", "metrics", "grafana",
-    "kibana", "logs", "log", "analytics", "stats", "statistics", "report",
-    "reports", "data", "db", "database", "sql", "mysql", "postgres",
-    "redis", "mongo", "cache", "memcached", "elastic", "search", "solr",
-    "es", "backup", "backups", "snapshot", "archive", "archived", "old",
-    "legacy", "blog", "news", "articles", "forum", "forums", "community",
-    "wiki", "knowledge", "base", "kb", "docs1", "shop", "store", "shopify",
-    "cart", "checkout", "pay", "payment", "payments", "billing", "invoice",
-    "invoices", "billing2", "accounting", "finance", "jobs", "job", "career",
-    "careers", "hr", "human", "resources", "recruiting", "talent", "about",
-    "contact", "team", "press", "media2", "investor", "investors", "partners",
-    "partner", "affiliate", "marketing", "advertise", "ads", "advertising",
-    "legal", "privacy", "terms", "security", "trust", "policies", "policy",
-    "compliance", "audit", "certifications", "cert", "certificate", "licenses",
-    "license", "brand", "events", "calendar", "maps", "map", "locations",
-    "location", "store2", "stores", "locator",
-]
-
-
-
-
-
-# (name, {header: regex}, [body regex]) — lightweight Wappalyzer-style sniffing.
-
 
 # ─── HTTP layer ───────────────────────────────────────────
 
@@ -144,20 +99,13 @@ def _sh(args, timeout=15, stdin=""):
     return utils._run_text(cmd, timeout=timeout, input=stdin, env=env)
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
-
-
-def _urllib_get(url, timeout=15, want="body", limit=1_000_000, follow=True):
+def _urllib_get(url, timeout=15, want="body", limit=1_000_000):
     """Native fallback for curl-free machines; honors the configured proxy."""
     try:
         handlers = []
         if utils._PROXY:
             handlers.append(urllib.request.ProxyHandler(
                 {"http": utils._PROXY, "https": utils._PROXY}))
-        if not follow:
-            handlers.append(_NoRedirect())
         opener = urllib.request.build_opener(*handlers)
         req = urllib.request.Request(url, headers={"User-Agent": UA})  # noqa: S310 - recon target is user-supplied
         with opener.open(req, timeout=timeout) as resp:
@@ -167,28 +115,6 @@ def _urllib_get(url, timeout=15, want="body", limit=1_000_000, follow=True):
         return headers, body.decode("utf-8", "replace"), status
     except Exception:
         return None
-
-
-def _parse_headers_block(text):
-    """Parse the final header block from curl -D output.
-
-    ``Set-Cookie`` is the one header that legitimately repeats; it is joined
-    with newlines so every cookie survives instead of the last one winning.
-    """
-    headers = {}
-    blocks = re.split(r"\r?\n\r?\n", text.strip())
-    if not blocks:
-        return headers
-    for line in blocks[-1].splitlines():
-        if ":" not in line or line.startswith(("HTTP/", "curl:")):
-            continue
-        key, _, value = line.partition(":")
-        key = key.strip().lower()
-        if key == "set-cookie":
-            headers[key] = (headers.get(key, "") + "\n" + value.strip()).strip("\n")
-        else:
-            headers[key] = value.strip()
-    return headers
 
 
 def _http_body(url, timeout=15, limit=1_000_000):
@@ -220,39 +146,6 @@ def _http_body(url, timeout=15, limit=1_000_000):
     if body:
         _BODY_CACHE[key] = body
     return body or ""
-
-
-def _http_status(url, timeout=15, follow=True):
-    if _CURL:
-        try:
-            args = [_CURL, "-sS", "-o", os.devnull, "-w", "%{http_code}",
-                    "-A", UA, "--max-time", str(timeout)]
-            if follow:
-                args.append("-L")
-            args.append(url)
-            r = _sh(args)
-            if r.returncode == 0 and r.stdout.strip().isdigit():
-                return int(r.stdout.strip())
-        except Exception:
-            pass
-    got = _urllib_get(url, timeout=timeout, want="headers", follow=follow)
-    return got[2] if got else 0
-
-
-def _http_bytes(url, timeout=10, limit=512 * 1024):
-    """Fetch raw bytes (for favicons); curl-only, best-effort."""
-    if not _CURL:
-        return None
-    try:
-        cmd = [_CURL, "-sS", "-L", "-A", UA, "--max-time", str(timeout), url]
-        if utils._PROXY:
-            cmd = cmd[:1] + utils._proxy_args() + cmd[1:]
-        r = subprocess.run(cmd, capture_output=True, timeout=timeout)
-        if r.returncode == 0 and r.stdout:
-            return r.stdout[:limit]
-    except Exception:
-        pass
-    return None
 
 
 def _http_json(url, timeout=15):

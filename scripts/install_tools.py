@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Install the optional CLI engines that Spyglass-Pro's recon legs shell out to.
 
-The email, username, phone, website, IP and metadata modules resolve their
-tools on ``PATH`` (see ``spyglass_pro/app.py::_TOOL_PROBES`` and
+The email, username, phone, website, dark-web and metadata modules resolve
+their tools on ``PATH`` (see ``spyglass_pro/app.py::_TOOL_PROBES`` and
 ``spyglass_osint/utils.py``) and skip themselves with a message when one is
 absent. Nothing in this repository installs those tools, so a fresh clone
 reports near-empty modules. This script closes that gap — every tool the
@@ -176,10 +176,6 @@ def install_user_scanner():
     return _pipx_install("user-scanner")
 
 
-def install_shodan():
-    return _pipx_install("shodan")
-
-
 def install_exiftool():
     """brew / winget+choco / apt / manual, in that order per platform."""
     if shutil.which("brew"):
@@ -289,8 +285,6 @@ TOOLS = {
                   "Email/username/phone sweep; git clone, no console script"),
     "user-scanner": (lambda: _which("user-scanner"), install_user_scanner,
                      "Email/username account sweeps"),
-    "shodan": (lambda: _which("shodan"), install_shodan,
-               "Shodan CLI (IP enrichment leg)"),
     "phoneinfoga": (lambda: _which("phoneinfoga"), install_phoneinfoga,
                     "Phone footprinting"),
     "exiftool": (lambda: _which("exiftool"), install_exiftool,

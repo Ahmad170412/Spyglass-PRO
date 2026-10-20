@@ -410,7 +410,11 @@ def _sg_website(target, flags, progress):
     # Normalise a pasted URL to its host so `example.com` and
     # `https://example.com/page` are the same case, not two.
     host = _website_host(target) or target
-    return _finish(mod.website(target), "website", host, flags, progress)
+    # The engine gets the normalized host too, not the raw input. A
+    # scheme-less path ("example.com/about") survives the validator but
+    # would reach the engine as a bogus hostname and answer with an empty
+    # WHOIS/DNS/CT report instead of the site's records.
+    return _finish(mod.website(host), "website", host, flags, progress)
 
 
 def _sg_darkweb(target, flags, progress):
@@ -1092,7 +1096,10 @@ def _spyglass_cases(limit):
     try:
         from spyglass_osint import store as sg_store
         db = sg_store._connect()
-    except ImportError:
+    except Exception:
+        # A read-only home, a missing directory or a corrupt database must
+        # not take the whole Cases panel down: this store is a nice-to-have,
+        # not a reason for the endpoint to fail.
         return []
     try:
         sg_store._init(db)
@@ -1114,7 +1121,7 @@ def _lens_cases(limit):
     try:
         from lens_extender import store as le_store
         conn = le_store._get_conn()
-    except ImportError:
+    except Exception:
         return []
     try:
         rows = conn.execute(

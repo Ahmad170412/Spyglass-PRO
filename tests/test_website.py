@@ -8,18 +8,6 @@ from helpers import imp
 web = imp("website")
 
 
-class ParseHeadersTest(unittest.TestCase):
-    def test_final_block_wins(self):
-        raw = (
-            "HTTP/1.1 301 Moved Permanently\r\nLocation: https://x.com/\r\n\r\n"
-            "HTTP/2 200 \r\nServer: nginx\r\nContent-Type: text/html\r\n"
-        )
-        headers = web._parse_headers_block(raw)
-        self.assertEqual(headers["server"], "nginx")
-        self.assertEqual(headers["content-type"], "text/html")
-        self.assertNotIn("location", headers)
-
-
 class SpfTest(unittest.TestCase):
     def test_all_mechanism(self):
         self.assertEqual(web._spf_all("v=spf1 include:_spf.google.com -all"), "strict")
@@ -63,19 +51,6 @@ class CrtSubsTest(unittest.TestCase):
         data = [{"name_value": "www.example.com"}, "garbage"]
         with mock.patch.object(web, "_http_json", return_value=data):
             self.assertEqual(web._crt_subs("example.com"), {"www.example.com"})
-
-
-class ParseHeadersMultiCookieTest(unittest.TestCase):
-    def test_multiple_set_cookie_preserved(self):
-        raw = (
-            "HTTP/2 200\r\n"
-            "Set-Cookie: a=1; Path=/\r\n"
-            "Set-Cookie: b=2; HttpOnly\r\n"
-            "Content-Type: text/html\r\n"
-        )
-        headers = web._parse_headers_block(raw)
-        self.assertEqual(headers["set-cookie"], "a=1; Path=/\nb=2; HttpOnly")
-        self.assertEqual(headers["content-type"], "text/html")
 
 
 class WaybackCdxTest(unittest.TestCase):

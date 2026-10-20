@@ -1318,6 +1318,16 @@ body {
   color: var(--fg);
 }
 
+/* Legacy Lens-Extender run: listed and deletable, but not loadable —
+   its history lives in a store this build does not read. */
+.cases-area tr.case-row-legacy td {
+  color: var(--fg-dim);
+}
+
+.cases-area tr.case-row-legacy {
+  cursor: default;
+}
+
 /* Per-run delete: quiet until hovered, so the table stays calm. */
 .case-del-cell {
   width: 34px;

@@ -232,6 +232,12 @@ document.addEventListener('DOMContentLoaded', function () {
       }
       var row = e.target.closest && e.target.closest('tr.case-row');
       if (!row) return;
+      /* A legacy Lens run has no timeline in this build — say so instead
+         of loading a target that answers "no stored runs". */
+      if (row.getAttribute('data-legacy') === '1') {
+        showToast('Legacy Lens-Extender case — history is not available in this build.', 'error');
+        return;
+      }
       var target = row.getAttribute('data-target') || '';
       var qtype = row.getAttribute('data-qtype') || '';
       document.getElementById('casesTarget').value = target;
@@ -2197,6 +2203,30 @@ function fmtRunAt(stamp) {
   return String(stamp || '').slice(0, 19);
 }
 
+/* One stored run as a table row.
+ *
+ * Legacy Lens-Extender runs live in their own store: they can be listed
+ * and deleted, but the timeline/diff/dossier readers query the Spyglass
+ * store only. Those rows are marked, so a click says the history is not
+ * available instead of loading a target that answers "no stored runs"
+ * for a row that is right there. */
+function caseRowHtml(c) {
+  var legacy = String(c.qtype || '').indexOf('lens_') === 0;
+  var title = legacy
+    ? 'Legacy Lens-Extender run — history is not available in this build'
+    : 'Load this target\'s timeline';
+  return '<tr class="case-row' + (legacy ? ' case-row-legacy' : '') +
+         '" data-target="' + escapeHtml(c.target) +
+         '" data-qtype="' + escapeHtml(c.qtype) +
+         '"' + (legacy ? ' data-legacy="1"' : '') +
+         ' title="' + escapeHtml(title) + '"><td>' + escapeHtml(c.target) +
+         '</td><td>' + escapeHtml(c.qtype) + '</td><td>' + c.id + '</td><td>' +
+         escapeHtml(fmtRunAt(c.run_at)) + '</td>' +
+         '<td class="case-del-cell"><button type="button" class="case-del" data-del-id="' + c.id +
+         '" data-del-qtype="' + escapeHtml(c.qtype) +
+         '" title="Delete this stored run">✕</button></td></tr>';
+}
+
 function loadCases() {
   var container = document.getElementById('casesList');
   if (!container) return;
@@ -2208,16 +2238,7 @@ function loadCases() {
         return;
       }
       var html = '<table><thead><tr><th>Target</th><th>Type</th><th>Run ID</th><th>Time</th><th></th></tr></thead><tbody>';
-      data.forEach(function (c) {
-        html += '<tr class="case-row" data-target="' + escapeHtml(c.target) +
-                '" data-qtype="' + escapeHtml(c.qtype) +
-                '" title="Load this target\'s timeline"><td>' + escapeHtml(c.target) +
-                '</td><td>' + escapeHtml(c.qtype) + '</td><td>' + c.id + '</td><td>' +
-                escapeHtml(fmtRunAt(c.run_at)) + '</td>' +
-                '<td class="case-del-cell"><button type="button" class="case-del" data-del-id="' + c.id +
-                '" data-del-qtype="' + escapeHtml(c.qtype) +
-                '" title="Delete this stored run">✕</button></td></tr>';
-      });
+      data.forEach(function (c) { html += caseRowHtml(c); });
       html += '</tbody></table>';
       container.innerHTML = html;
     })

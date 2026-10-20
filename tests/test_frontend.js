@@ -36,7 +36,7 @@ vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(APP_JS, 'utf8'), sandbox, { filename: 'app.js' });
 
 const { escapeHtml, emptyCases, renderCaseDiff, renderCaseTimeline, renderCaseProfile,
-        confirmAction, deleteCase } = sandbox;
+        confirmAction, deleteCase, caseRowHtml } = sandbox;
 
 let pass = 0;
 let fail = 0;
@@ -617,6 +617,22 @@ check('lens microseconds trimmed',
   sandbox.fmtRunAt('2026-10-03T12:14:52.896458+00:00') === '2026-10-03T12:14:52');
 check('spyglass stamps untouched', sandbox.fmtRunAt('2026-10-03T15:52:04') === '2026-10-03T15:52:04');
 check('missing stamp is blank', sandbox.fmtRunAt(null) === '');
+
+console.log('== legacy lens cases are listed but not loadable ==');
+const lensRow = caseRowHtml({ id: 3, target: '1.1.1.1', qtype: 'lens_passive',
+                               run_at: '2026-10-03T12:14:52.896458+00:00' });
+check('lens row is marked legacy', lensRow.includes('data-legacy="1"')
+  && lensRow.includes('case-row-legacy'), lensRow);
+check('lens row says its history is unavailable',
+  lensRow.includes('not available in this build'), lensRow);
+check('lens row can still be deleted', lensRow.includes('data-del-id="3"')
+  && lensRow.includes('data-del-qtype="lens_passive"'), lensRow);
+const spyglassRow = caseRowHtml({ id: 4, target: 'a@b.com', qtype: 'email',
+                                  run_at: '2026-10-03T15:52:04' });
+check('a normal case row stays loadable', !spyglassRow.includes('data-legacy')
+  && !spyglassRow.includes('case-row-legacy'), spyglassRow);
+check('a normal case row still offers its timeline',
+  spyglassRow.includes('Load this target'), spyglassRow);
 
 /* The registry-failure test above is asynchronous; let its checks land
  * before the tally prints, so the summary matches what actually ran. */

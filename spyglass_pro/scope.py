@@ -1,13 +1,17 @@
 """The recon vocabulary this build exposes.
 
-1.3 is a HUMINT release. The IP module, the heavy website phases and
+This is a HUMINT build. The IP module, the heavy website phases and
 Lens-Extender stay in the tree — the sibling tool consumes them — but
-they are not part of the product surface: nothing in the dashboard or
-the public API can reach them.
+they are not part of the product surface: no dashboard panel and no scan
+endpoint can reach them. (The one place a dormant engine's name still
+appears is the legacy case table, which lists and deletes old Lens runs
+so operators can clean up; it cannot run one.)
 
 Everything reachable by an operator is listed here. The point is that
 "what this build does" is one reviewable list instead of a handler map
-plus a UI grid plus a docs page that can drift apart.
+plus a UI grid plus a docs page that can drift apart. The list is
+enforced, not decorative: ``app.py`` refuses any module that is neither
+exposed nor explicitly dormant.
 
 Dormant is not deleted. ``runner.run_spyglass`` still dispatches the
 ``ip`` handler for in-process callers and tests; the HTTP boundary in
@@ -32,9 +36,9 @@ EXPOSED_MODULES = (
 DORMANT_MODULES = ("ip",)
 DORMANT_ENGINES = ("lens",)
 
-# The website phases 1.3 promises. Everything heavier (ports, headers,
-# subdomain enumeration, Shodan) is dormant with the rest of the infra
-# work.
+# The website phases this build promises. Everything heavier (ports,
+# headers, subdomain enumeration, Shodan) is dormant with the rest of the
+# infra work.
 WEBSITE_LIGHT = ("registrant", "whois", "dns", "ct")
 
 

@@ -17,5 +17,11 @@ recursive-include tests *.py *.js
 recursive-include docs *
 recursive-include assets *
 
+# Working documents that live in the tree but must never ship. They are
+# excluded from git too, but MANIFEST.in does not read .gitignore — a
+# `python -m build` copies the working tree, so an ignored draft would
+# still land in the sdist unless it is excluded here.
+exclude docs/PLAN-*.md
+
 # LICENSE and NOTICE ship via `license-files` in pyproject.toml (PEP 639), so
 # they are deliberately not repeated here.

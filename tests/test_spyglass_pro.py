@@ -299,6 +299,31 @@ class QueueRejectionHttpTest(unittest.TestCase):
         self.assertIn("error", resp.get_json())
 
 
+class WebsiteHostNormalizationTest(unittest.TestCase):
+    """The engine must receive a host, not the pasted URL or path.
+
+    The case label and the engine used to disagree: the case stored
+    "example.com" while the engine got "example.com/about" and answered
+    with an empty WHOIS/DNS report instead of the site's records.
+    """
+
+    def _engine_target(self, target):
+        from spyglass_osint import website as web
+        with mock.patch.object(web, "website", return_value={"ct": []}) as run:
+            runner._sg_website(target, {}, mock.Mock())
+        return run.call_args[0][0]
+
+    def test_scheme_less_path_becomes_the_host(self):
+        self.assertEqual(self._engine_target("example.com/about"), "example.com")
+
+    def test_full_url_becomes_the_host(self):
+        self.assertEqual(self._engine_target("https://example.com/page?q=1"),
+                         "example.com")
+
+    def test_bare_domain_is_unchanged(self):
+        self.assertEqual(self._engine_target("example.com"), "example.com")
+
+
 class DeleteCaseTest(unittest.TestCase):
     """Stored runs must be deletable, or the case table only grows."""
 
@@ -630,7 +655,7 @@ class SettingsSaveTest(unittest.TestCase):
     """The vault must round-trip: save sets, empty clears, junk proxy 400s.
 
     A fake store keeps the suite off the operator's real
-    ~/.lens-extender/config.json; env vars the save writes are removed on
+    ~/.spyglass/vault.json; env vars the save writes are removed on
     teardown so one test cannot leak a key into the next.
     """
 
@@ -650,26 +675,32 @@ class SettingsSaveTest(unittest.TestCase):
                                  return_value=FakeStore())
         self._store.start()
         self.addCleanup(self._store.stop)
-        for env in ("SHODAN_API_KEY", "VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY",
-                    "CENSYS_API_ID", "CENSYS_API_KEY", "GREYNOISE_API_KEY",
-                    "NVD_API_KEY", "INTELX_API_KEY", "HIBP_API_KEY"):
+        for env in ("INTELX_API_KEY", "HIBP_API_KEY"):
             os.environ.pop(env, None)
-        self.addCleanup(os.environ.pop, "SHODAN_API_KEY", None)
+        self.addCleanup(os.environ.pop, "INTELX_API_KEY", None)
 
     def test_save_then_clear_round_trip(self):
-        resp = self.client.post("/api/settings", json={"shodan_api_key": "abc123"})
+        resp = self.client.post("/api/settings", json={"intelx_api_key": "abc123"})
         self.assertEqual(resp.status_code, 200)
         snap = self.client.get("/api/settings").get_json()
-        key = next(k for k in snap["keys"] if k["key"] == "shodan_api_key")
+        key = next(k for k in snap["keys"] if k["key"] == "intelx_api_key")
         self.assertTrue(key["configured"])
         self.assertTrue(key["hint"].endswith("c123"))
 
-        resp = self.client.post("/api/settings", json={"shodan_api_key": ""})
+        resp = self.client.post("/api/settings", json={"intelx_api_key": ""})
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("shodan_api_key", resp.get_json()["cleared"])
+        self.assertIn("intelx_api_key", resp.get_json()["cleared"])
         snap = self.client.get("/api/settings").get_json()
-        key = next(k for k in snap["keys"] if k["key"] == "shodan_api_key")
+        key = next(k for k in snap["keys"] if k["key"] == "intelx_api_key")
         self.assertFalse(key["configured"])
+
+    def test_settings_offers_only_the_keys_an_exposed_module_reads(self):
+        """The dormant IP/Lens API keys are not part of this build's vault."""
+        snap = self.client.get("/api/settings").get_json()
+        keys = {k["key"] for k in snap["keys"]}
+        self.assertEqual(keys, {"intelx_api_key", "hibp_api_key"})
+        self.assertNotIn("shodan_api_key", keys)
+        self.assertNotIn("nvd_api_key", keys)
 
     def test_invalid_proxy_is_rejected(self):
         resp = self.client.post("/api/settings", json={"proxy": "file:///etc/passwd"})
