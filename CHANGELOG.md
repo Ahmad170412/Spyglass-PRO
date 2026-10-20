@@ -5,6 +5,107 @@ the check counts quoted below are what the suite prints on a clean run.
 Versions are read from `spyglass_pro/version.py` / `pyproject.toml`; those two
 may not disagree (a pinning test fails if they do).
 
+## 1.5.0 — 2026-10-20
+
+The pivot release: Spyglass-Pro stops being an *infrastructure* product and
+becomes a **HUMINT** one. The IP module, the heavy website phases and
+Lens-Extender are no longer part of the product surface, and the build gains
+what replaces them — identity resolution, and a light website recon that
+touches only third parties.
+
+**Version numbering.** The public history is `1.0.0 → 1.1.0 → 1.5.0`.
+`1.2`, `1.3` and `1.4` were internal builds of this work: they were never
+published to PyPI and never had a release, so the public history skips them
+rather than pretending they exist. `1.5.0` rather than `2.0.0` because the
+project is weeks old, not because the changes are small — they are breaking
+(see below) — and `2.0` is reserved for a stable HUMINT API. `1.1.0` is the
+last public release that contains the IP/Lens infrastructure.
+
+**Breaking changes**
+
+- **The IP module and Lens-Extender are unexposed.** No dashboard panel and
+  no API endpoint can reach them any more: `GET /api/spyglass/run?module=ip`
+  and `GET /api/lens/run` both answer `400` with a message that names the
+  reason. The code is **not deleted** — it stays in the tree, importable and
+  tested, because a sibling tool consumes it. The exposure boundary is
+  enforced, not documented: `app.py` now refuses any module that is neither
+  exposed nor explicitly dormant, and a test pins the handler map to
+  `exposed ∪ dormant` so a new engine cannot become reachable by accident.
+- **Website recon is light, passive and owner-scoped.** The Website panel
+  does owner/registrant, WHOIS, basic DNS, e-mail security records (SPF /
+  DMARC / DKIM / CAA), wildcard-DNS detection and Certificate Transparency.
+  Shodan, port checks, HTTP header collection, the aggregated subdomain
+  sweep and Wayback history are dormant. The panel accepts **a domain or an
+  `http(s)` URL only** — a direct IP address is refused. A pasted URL is
+  normalized to its host, so `https://example.com/page` and `example.com`
+  are one case, not two.
+- **A website is context, not an identity anchor.** A domain you type in
+  never becomes "who this person is". It stays under Identity as context;
+  IPs derived from it passively remain investigation entities.
+- **Settings offers two keys, not nine.** Only IntelX and HIBP — the two
+  an exposed module actually reads. The dormant infrastructure keys (Shodan,
+  VirusTotal, AbuseIPDB, Censys, GreyNoise, NVD) are gone from the vault UI
+  and stay in the old config file untouched.
+- **The API-key vault moved.** Settings used to be stored in the vendored
+  Lens engine's config file (`~/.lens-extender/config.json`). The vault now
+  owns `~/.spyglass/vault.json` (0600 on POSIX). On first run it imports the
+  live keys from the old file **once** and leaves that file exactly as it
+  was — so the sibling tool keeps working, and cutting Lens out of this
+  tree in a later version can no longer take Settings storage with it.
+
+**Added**
+
+- **Identity resolution** (`spyglass.person/1`) — Full Investigation now
+  resolves its inputs into a *person model* instead of a bag of entities:
+  anchors, attributes, accounts, breaches, links, conflicts and context, in
+  seven layers. Shared handles and e-mail local-part matches are recorded as
+  **possible**, never as merges: a shared handle is not proof, and the build
+  says so. Links carry `high` / `medium` / `possible`; the overall verdict
+  carries `high` / `medium` / `unconfirmed`. One value per field, but the
+  model is list-ready. The layer is **additive**: no new query type, no new
+  endpoint, no new store path — it rides on the existing Full Investigation
+  run, and stored runs from older versions render exactly as they did.
+- **A results UI that reads like a report.** Each result card leads with a
+  compact person grid, a three-column accounts table, compact links and
+  conflicts, and the one-line summary under the card header. `Details`,
+  `Run log (N)` and `Raw JSON` are collapsed drawers instead of walls of
+  text. The correlator's detail moved into `Details` as well.
+- **A themed delete dialog.** Deleting a stored case uses an in-app
+  `<dialog>` — cancel, Esc, backdrop click and confirm all behave — instead
+  of `window.confirm`.
+
+**Fixed**
+
+- **Website targets reached the engine unnormalized.** The case label used
+  the normalized host while the engine received the pasted input, so a
+  scheme-less path (`example.com/about`) passed validation and then produced
+  an empty WHOIS/DNS/CT report instead of the site's records. The engine gets
+  the host now.
+- **`/api/cases` could take the whole Cases panel down.** The store
+  connection sat outside the `try`, so a read-only home or a corrupt
+  database raised past the endpoint and returned HTML where the dashboard
+  expected JSON. Both stores degrade to an empty list now.
+- **Legacy Lens case rows promised a timeline that does not exist here.**
+  They were clickable but had no diff/timeline/profile in this build, so a
+  click answered "no stored runs" for a row that was right there. Those rows
+  are marked read-only and say so; they can still be deleted.
+- **The source distribution shipped a working draft.** `MANIFEST.in` does
+  not read `.gitignore`, so `python -m build` copied the ignored
+  `docs/PLAN-*.md` into the sdist. It is excluded now, and the exclusion is
+  verified against a real build.
+- **Dead heavy-website helpers were cut from the exposed module**:
+  `_SUB_LIST`, `_http_status`, `_http_bytes`, `_parse_headers_block` and
+  `_NoRedirect` had no callers anywhere in the tree.
+- **The optional-engine installer stopped shipping a Shodan CLI** that no
+  exposed module uses.
+
+**Kept on purpose** — the dormant IP/Lens code, the heavy website phases
+and the `lens_extender` package stay in the tree, importable and tested,
+for the sibling tool. A later release removes them permanently; this one
+only stops exposing them.
+
+`tests/run_tests.py` — **627 checks, 0 failed** (was 612).
+
 ## 1.1.0 — 2026-10-17
 
 Hardening release: three new keyless social sources, plus a security and

@@ -1,7 +1,7 @@
 name: Release
 
 # Cut a release by pushing a version tag, e.g.:
-#   git tag -a v1.1.0 -m "Spyglass-Pro 1.1.0" && git push origin v1.1.0
+#   git tag -a v1.5.0 -m "Spyglass-Pro 1.5.0" && git push origin v1.5.0
 # The tag must match spyglass_pro/version.py / pyproject.toml (test_version.py
 # pins those two together; keep the tag in step with them by hand).
 on:
@@ -43,6 +43,19 @@ jobs:
         # that fails here is rejected or renders broken on the project page, so
         # this gates the publish instead of discovering it after the fact.
         run: twine check dist/*
+      - name: The sdist must not carry local working drafts
+        # MANIFEST.in does not read .gitignore, so a draft that is ignored in
+        # git can still be copied into the sdist by `python -m build`. Publish
+        # only what was meant to ship.
+        run: |
+          set -euo pipefail
+          sdist=$(ls dist/*.tar.gz)
+          if tar tzf "$sdist" | grep -q "docs/PLAN-"; then
+            echo "FAIL: the sdist carries a local working draft:"
+            tar tzf "$sdist" | grep "docs/PLAN-"
+            exit 1
+          fi
+          echo "sdist carries no working drafts"
       - uses: actions/upload-artifact@v4
         with:
           name: dist

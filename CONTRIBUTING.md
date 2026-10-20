@@ -101,6 +101,20 @@ directory boundary on purpose:
   under "Merge provenance" — check before re-syncing, or you will revert a bug
   fix.
 
+### Dormant engines
+
+`lens_extender` and `spyglass_osint.ip` are **dormant**: the code is vendored
+here because a sibling tool consumes it, but neither has a product surface in
+this build — no dashboard panel, no endpoint, no query type.
+`spyglass_pro/scope.py` is the list of what is exposed, and the HTTP boundary
+enforces it (anything neither exposed nor explicitly dormant is refused, and
+a test pins the handler map to those two sets).
+
+Do not add UI, an endpoint or a dispatch entry for a dormant engine. Changing
+the scope list is a product decision, not a refactor — and the rule that keeps
+it honest is the one above: if a new handler appears in the runner without a
+scope decision, the suite fails.
+
 ## House style
 
 - `ruff check .` must pass (line length 120, isort ordering).

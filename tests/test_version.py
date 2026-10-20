@@ -17,7 +17,7 @@ pkg = imp("")
 
 class VersionTest(unittest.TestCase):
     def test_package_version(self):
-        self.assertEqual(spyglass_pro.__version__, "1.1.0")
+        self.assertEqual(spyglass_pro.__version__, "1.5.0")
 
     def test_package_version_matches_distribution(self):
         """pyproject and the app must agree — two version strings that

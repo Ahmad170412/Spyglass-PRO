@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spyglass-pro"
-version = "1.1.0"
-description = "Spyglass-Pro — unified OSINT superpower wiring Spyglass-OSINT, InstaCloak, and Lens-Extender into one platform"
+version = "1.5.0"
+description = "Spyglass-Pro — one passive OSINT dashboard for people, accounts and websites: identity resolution, light website recon and a local case store"
 readme = "README.md"
 # PEP 639: a single SPDX expression plus explicit license files, in place of
 # the deprecated `license = {file = ...}` table and the license classifier.
@@ -14,7 +14,7 @@ license = "MIT"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.10"
 authors = [{ name = "TeamLeader", email = "teamleadertrue@gmail.com" }]
-keywords = ["osint", "recon", "unified", "instagram", "ip", "investigation"]
+keywords = ["osint", "recon", "identity-resolution", "investigation", "humint", "passive", "case-store", "social"]
 classifiers = [
     "Environment :: Console",
     "Intended Audience :: Information Technology",

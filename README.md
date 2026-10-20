@@ -4,17 +4,19 @@
 
 # Spyglass-Pro
 
-### One dashboard. Three recon engines. **Zero packets sent to your target.**
+**Resolve a person, an account or a website into evidence — without ever touching the target.**
+One passive OSINT dashboard: identity resolution, light website recon, breach and social sources, and an encrypted local case store.
 
 [![CI](https://github.com/Ahmad170412/Spyglass-PRO/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmad170412/Spyglass-PRO/actions)
 [![Release](https://img.shields.io/github/v/release/Ahmad170412/Spyglass-PRO?color=6366f1&label=release)](https://github.com/Ahmad170412/Spyglass-PRO/releases)
-[![PyPI version](https://img.shields.io/pypi/v/spyglass-pro.svg)](https://pypi.org/project/spyglass-pro/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-06b6d4.svg)](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/spyglass-pro.svg)](https://pypi.org/project/spyglass-pro/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-06b6d4.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
+[![Language](https://img.shields.io/github/languages/top/Ahmad170412/Spyglass-PRO?color=6366f1&label=python)](https://github.com/Ahmad170412/Spyglass-PRO)
 [![Passive only](https://img.shields.io/badge/recon-passive--only-6366f1?logo=shield&logoColor=white)](#passive-only)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CONTRIBUTING.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[**Quick Start**](#quick-start) · [**Features**](#features) · [**Architecture**](#architecture) · [**Configuration**](#configuration) · [**API**](#api) · [**Changes**](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CHANGELOG.md) · [**Contributing**](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CONTRIBUTING.md) · [**Security**](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/.github/SECURITY.md) · [**Audit**](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/AUDIT-2026-10.md)
+[**Quick Start**](#quick-start) · [**Features**](#features) · [**Architecture**](#architecture) · [**Identity**](#identity-resolution) · [**Configuration**](#configuration) · [**API**](#api) · [**Changelog**](CHANGELOG.md) · [**Contributing**](CONTRIBUTING.md) · [**Security**](.github/SECURITY.md) · [**Audit**](AUDIT-2026-10.md)
 
 </div>
 
@@ -29,16 +31,19 @@ run, in what order, and how to read the output. Spyglass-Pro is a single
 dashboard that answers a different question: **what is actually knowable about
 a target, and how do I know the answer is real?**
 
-- **Three engines, one interface.** Spyglass-OSINT, a stealth social harness,
-  and Lens-Extender are merged behind a single job pool that runs them in
-  parallel and correlates the entities they each find.
+- **It resolves people, not just entities.** Full Investigation turns a name,
+  handle, e-mail, phone or website into one *person model* — anchors,
+  attributes, accounts, breaches, links, conflicts and context — instead of a
+  bag of unrelated hits. A shared handle is recorded as **possible**, never as
+  a merge: the tool tells you what it does not know.
 - **Passive by construction, not by policy.** Every probe that touched a
   target was *deleted*, not disabled — no flag, env var or config path brings
-  it back. The [audit](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/AUDIT-2026-10.md#active-scanning-removed) lists every
+  it back. The [audit](AUDIT-2026-10.md#active-scanning-removed) lists every
   one so it can't quietly reappear.
 - **It refuses to lie to you.** A follower list behind a login is reported as
   *walled with a reason*, never as an empty list. A recon leg that can't run
-  is named in `/api/status`. A partial result never renders like a complete one.
+  is named in `/api/status`. A partial result never renders like a complete
+  one.
 - **Honest degradation is a feature, not a bug report.** Run it bare and it
   tells you exactly which panels are breach-only instead of quietly showing
   you nothing.
@@ -51,56 +56,50 @@ a target, and how do I know the answer is real?**
 
 ## Table of Contents
 
-- [What's new in 1.1](#whats-new-in-11)
+- [What's new in 1.5](#whats-new-in-15)
 - [Quick Start](#quick-start)
 - [Features](#features)
 - [Architecture](#architecture)
+- [Identity resolution](#identity-resolution)
 - [Installation](#installation)
 - [Optional CLI engines](#optional-cli-engines)
 - [Passive-only](#passive-only)
 - [Configuration](#configuration)
+- [Usage](#usage)
 - [API](#api)
 - [Cases](#cases)
 - [Testing](#testing)
 - [Platforms](#platforms)
-- [Project structure](#project-structure)
+- [Repository structure](#repository-structure)
 - [Contributing](#contributing)
-- [Changelog](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CHANGELOG.md)
 - [Responsible use](#responsible-use)
 - [License](#license)
 
 ---
 
-## What's new in 1.1
+## What's new in 1.5
 
-1.1 is a hardening release: three new **keyless** social sources, a security
-pass over the seams between versions, and honest answers where 1.0 was thin.
-The full list is in the [changelog](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CHANGELOG.md).
+1.5 is the pivot release. Spyglass-Pro stops being an *infrastructure*
+product and becomes a **HUMINT** one: the IP module, the heavy website phases
+and Lens-Extender are no longer part of the product surface, and the build
+gains what replaces them. The full list is in the
+[changelog](CHANGELOG.md).
 
-- **Keybase** joins the social panel — keyless, and the strongest correlation
-  source in the tree: it returns the account's cryptographically-**proven**
-  identities (Twitter, GitHub, Reddit, Hacker News, DNS, web), claimed by the
-  user's own key. That is a fact, not a guess from a shared handle.
-- **GitHub and GitLab** are keyless too. Both report the budget tier their
-  *response* actually came back with (GitHub 60 req/h, GitLab 500 req/min
-  unauthenticated); set `GITHUB_TOKEN` / `GITLAB_TOKEN` to raise it, and the
-  panel says which tier it got instead of assuming.
-- **The case store keeps its promise.** With `SPYGLASS_STORE_KEY` set, the
-  entity index is now encrypted alongside the result snapshot — before, the
-  index held the same domains, IPs and emails in cleartext, leaking exactly
-  what the encryption existed to protect.
-- **The default install is closed off.** With no token, the dashboard answers
-  only loopback `Host`s (DNS-rebinding defense), refuses cross-site /
-  foreign-`Origin` browser requests, masks proxy credentials in every
-  response, and sets a `Content-Security-Policy` plus the usual framing and
-  sniffing headers.
-- **IPv6 works.** The `ip` module accepted an IPv6 literal and then always
-  failed to resolve it; it resolves now, and a malformed address is refused
-  instead of accepted.
-- **Real phone formats pass, flag-shaped input does not** — `+1 415 555 0100`
-  and `(415) 555-0100` are accepted; a leading `-` is not.
-- **Windows and CI.** Broader Windows tool fallbacks (winget/choco), a Windows
-  test job, and a `mypy` job that actually runs in CI.
+- **Identity resolution.** Full Investigation now resolves its inputs into a
+  person model — seven layers, one value per field, list-ready — with
+  `high` / `medium` / `possible` confidence on every link.
+- **Website recon is light and owner-scoped.** Owner/registrant, WHOIS, basic
+  DNS, SPF/DMARC/DKIM/CAA, wildcard-DNS detection and Certificate
+  Transparency. A domain or an `http(s)` URL only — never a direct IP.
+- **The results panel reads like a report.** A compact person grid, a
+  three-column accounts table, compact links and conflicts, and `Details` /
+  `Run log (N)` / `Raw JSON` as collapsed drawers.
+- **A themed delete dialog** replaces `window.confirm` for stored cases.
+- **The boundary is enforced, not documented.** Any module that is neither
+  exposed nor explicitly dormant is refused at the API — a new engine cannot
+  become reachable by accident.
+- **The API-key vault is its own file** (`~/.spyglass/vault.json`) and offers
+  only the two keys an exposed module actually reads.
 
 ---
 
@@ -125,10 +124,10 @@ python run.py
 
 Open <http://127.0.0.1:5000>.
 
-That's it — the keyless panels (**Website**, **IP Address**, **Full
-Investigation**, and the social adapters **GitLab**, **GitHub**, **Keybase**,
-**Mastodon**, **Bluesky**) work immediately. The **email**, **username** and
-**phone** panels need optional CLI engines. The one-line installer ships with a
+That's it — the keyless panels (**Website**, **Full Investigation**, and the
+social adapters **Bluesky**, **GitHub**, **GitLab**, **Keybase**,
+**Mastodon**) work immediately. The **email**, **username** and **phone**
+panels need optional CLI engines. The one-line installer ships with a
 **source checkout**, not the wheel, so use it from the clone above:
 
 ```bash
@@ -152,17 +151,20 @@ launch agent instead of a login shell.
 
 | Feature | What it actually does |
 | --- | --- |
-| **Website** | DNS records, SPF/DMARC/CAA, passive subdomains from crt.sh + CertSpotter + HackerTarget + Wayback, WHOIS with IANA referral-following, history |
-| **Email** | holehe + user-scanner + blackbird sweeps, cross-tool agreement, LeakCheck + Scylla breach data |
+| **Full Investigation** | Runs the modules in parallel, correlates the results and resolves them into a person model — anchors, attributes, accounts, breaches, links, conflicts, context |
+| **Website** | Owner/registrant, WHOIS with referral-following, basic DNS, SPF/DMARC/DKIM/CAA, wildcard-DNS detection, certificate transparency. Domain or URL only; never a direct IP |
+| **Email** | holehe + user-scanner + blackbird sweeps, cross-tool agreement, breach data |
 | **Username** | sherlock + maigret + user-scanner + blackbird, with four-way overlap categories |
 | **Phone** | phoneinfoga + ignorant, plus breach correlation |
-| **IP Address** | InternetDB, RDAP, RIPEstat, reverse DNS, DNSBL, Shodan |
-| **Dark web** | Ahmia onion-index search, LeakCheck + Scylla breach data, keyed IntelX + HIBP |
-| **Investigation** | Runs every engine in parallel and correlates shared emails, IPs, domains and usernames |
+| **Dark web** | Ahmia onion-index search, breach data, keyed IntelX + HIBP |
+| **Social** | Instagram (stealth browser) + Bluesky, GitHub, GitLab, Keybase and Mastodon (keyless, instant), one registry-driven panel |
 | **OPSEC** | Local self-check: your real IP, proxy status, DNS-leak exposure, timezone/geo fingerprint risk |
 | **Metadata** | ExifTool + PDF/OOXML/image fallbacks, MD5/SHA-256, GPS, with file-type reconciliation |
-| **Social** | Instagram (stealth browser) + GitLab, GitHub, Keybase, Mastodon and Bluesky (keyless, instant), one registry-driven panel |
 | **Cases** | Encrypted-at-rest run history with entity diffing, timelines and dossier export |
+
+The **IP Address** panel and **Lens-Extender** are not part of this build.
+Their code stays in the tree for a sibling tool, but no panel and no endpoint
+can reach it — see [Passive-only](#passive-only).
 
 ---
 
@@ -172,22 +174,55 @@ launch agent instead of a login shell.
 graph LR
     UI[Dashboard<br/>Flask + vanilla JS] --> AUTH[[Auth gate<br/>Bearer token]]
     AUTH --> POOL[Job pool<br/>queue cap · 429 · timeouts]
-    POOL --> SG[spyglass_osint<br/>email · username · phone<br/>website · ip · darkweb<br/>opsec · metadata]
-    POOL --> LENS[lens_extender<br/>IP / domain recon]
+    POOL --> SG[spyglass_osint<br/>email · username · phone<br/>website · darkweb<br/>opsec · metadata]
     POOL --> SOC[social harness<br/>registry-driven adapters]
+    POOL --> INV[Full Investigation]
+    SG --> INV
+    SOC --> INV
+    INV --> ID[Identity layer<br/>spyglass.person/1]
     SG --> STORE[(Case store<br/>Fernet at rest)]
-    LENS --> STORE
     SOC --> STORE
     SG -. shells out to .-> CLI[holehe · sherlock<br/>maigret · ignorant · blackbird]
     UI --> EXT[(JSON / CSV / MD<br/>export artifacts)]
 
     style POOL fill:#1e293b,stroke:#6366f1,color:#e2e8f0
     style STORE fill:#1e293b,stroke:#06b6d4,color:#e2e8f0
+    style ID fill:#1e293b,stroke:#8b5cf6,color:#e2e8f0
     style UI fill:#1e293b,stroke:#8b5cf6,color:#e2e8f0
 ```
 
 Every box under `POOL` only ever talks to third-party services. There is no
-edge from any of them to the target.
+edge from any of them to the target. The identity layer is **additive**: it
+reads the results the engines already produced and adds no endpoint, no query
+type and no new store path.
+
+---
+
+## Identity resolution
+
+Full Investigation does not just merge results — it resolves them. The
+output is a person model (`spyglass.person/1`) with seven layers:
+
+| Layer | What it holds |
+| --- | --- |
+| **Anchors** | The inputs themselves, and what a run could prove about them |
+| **Attributes** | Names, locations, organisations, handles, e-mails, phones |
+| **Accounts** | One row per platform, with the engines that agree and the confidence |
+| **Breaches** | Where the identifiers show up in breach data |
+| **Links** | Relationships between anchors, each with a confidence |
+| **Conflicts** | Where two sources disagree — the interesting part |
+| **Context** | Facts that are true but not identifying (a website, a country) |
+
+**The rules it keeps:**
+
+- A shared handle or a matching e-mail local part is **possible**, never a
+  merge. Two people can own the same username; the build says so instead of
+  guessing.
+- A website you typed in is **context**, not an identity anchor. It never
+  turns into "this is who the person is".
+- Links carry `high` / `medium` / `possible`; the overall verdict carries
+  `high` / `medium` / `unconfirmed`.
+- One value per field — but the model is list-ready, so a field can grow.
 
 ---
 
@@ -221,15 +256,15 @@ wants a license key:
 pip install cloakbrowser
 ```
 
-GitLab, GitHub, Keybase, Mastodon and Bluesky are keyless JSON sources: they
+Bluesky, GitHub, GitLab, Keybase and Mastodon are keyless JSON sources: they
 need no browser, no account and no key, and work on a bare install. The two
 code forges fill the same panel shape from very different APIs — with GitLab's
 unauthenticated profile being the honest *short* form (name, handle, avatar,
-state, published email) — so the panel's capability header never promises what
-the keyless API cannot return. Keybase is the odd one out and the most useful:
-it returns the account's cryptographically-**proven** identities (the Twitter,
-GitHub, Reddit and Hacker News accounts the user has signed for), which is
-correlation you can trust rather than infer.
+state, published e-mail) — so the panel's capability header never promises
+what the keyless API cannot return. Keybase is the odd one out and the most
+useful: it returns the account's cryptographically-**proven** identities (the
+Twitter, GitHub, Reddit and Hacker News accounts the user has signed for),
+which is correlation you can trust rather than infer.
 
 </details>
 
@@ -246,7 +281,7 @@ python scripts/install_tools.py            # install the missing ones
 ```
 
 This covers sherlock, maigret, holehe, ignorant, blackbird, user-scanner,
-shodan, phoneinfoga, exiftool, dig/whois/curl and torsocks — every tool the
+phoneinfoga, exiftool, dig/whois/curl and torsocks — every tool the
 dashboard can detect. It ships with a **source checkout** (`git clone` /
 `pip install -e .`), not the published wheel; a PyPI install has no
 `scripts/` directory, so install the engines directly there. The script is
@@ -265,16 +300,11 @@ what a bare install can and cannot do:
 | Username | sherlock + maigret + user-scanner + blackbird sweeps, plus breach | **breach data only** |
 | Phone | phoneinfoga + ignorant, plus breach | **breach data only** |
 
-Breach checking (LeakCheck + Scylla) needs no account and no CLI tool, so it
-works on a bare install. **Website** and **IP Address** run without any *recon*
-engine, but their richer legs depend on tools that may be absent — Website uses
-`dig`, `whois` and `curl`; IP uses `shodan` for host/port data. **Full
+Breach checking needs no account and no CLI tool, so it works on a bare
+install. **Website** runs without any *recon* engine too, but its richer legs
+depend on tools that may be absent — it uses `dig` and `whois`. **Full
 Investigation** merges the modules above, so its coverage is theirs. `GET
 /api/status` reports exactly which tools are missing on your machine.
-
-To confirm what the running server can see, `GET /api/status` returns a
-per-tool `true`/`false` map, a `missing_tools` list and a per-panel `degraded`
-map.
 
 > `holehe` and `ignorant` enumerate which platforms an email or phone number is
 > registered on. That is active account enumeration against third-party
@@ -287,16 +317,20 @@ map.
 
 **Spyglass-Pro never opens a connection to a target.** Every query goes to a
 third party: DNS resolvers, Certificate Transparency logs, WHOIS registries,
-InternetDB, RDAP, RIPEstat, Wayback, crt.sh, CertSpotter, HackerTarget and
-breach databases. Shodan, GreyNoise, Censys, AbuseIPDB, VirusTotal and NVD
-enrichment are wired but need an API key.
+Ahmia, breach databases and social APIs.
 
 There is no port scan, no directory brute force, no HTTP probing of discovered
 hosts, no zone-transfer attempt and not even a fetch of the target's homepage.
 That code was **removed, not disabled** — the
-[audit inventory](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/AUDIT-2026-10.md#active-scanning-removed) lists every
+[audit inventory](AUDIT-2026-10.md#active-scanning-removed) lists every
 removed function, so none of it can be switched back on by configuration or a
 stray flag.
+
+**The IP module, the heavy website phases and Lens-Extender are unexposed.**
+They stay in the tree — a sibling tool consumes them — but no dashboard panel
+and no API endpoint can reach them: the HTTP boundary refuses them by name.
+The boundary is enforced rather than documented, and a test pins the handler
+map to the exposed set, so a new engine cannot become reachable by accident.
 
 **Where the line sits:** ordinary DNS record lookups (A, MX, NS, TXT, SPF,
 DMARC, CNAME) are still made, because no useful host recon exists without them
@@ -312,7 +346,7 @@ in a separate project.
 ## Configuration
 
 All settings are environment variables (CLI flags exist for the basics — see
-`spyglass-pro --help`):
+`spyglass-pro --help`). **Every one of them is optional.**
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -328,6 +362,16 @@ All settings are environment variables (CLI flags exist for the basics — see
 | `SPYGLASS_HOME` | `~/.spyglass` | Case store location |
 | `SPYGLASS_STORE_KEY` | — | Base64 32-byte Fernet key for data at rest |
 | `SPYGLASS_STORE_PASS` | — | Derive the Fernet key from a password instead |
+| `INTELX_API_KEY` | — | IntelX breach/paste search (also editable in Settings) |
+| `HIBP_API_KEY` | — | HIBP breach list (also editable in Settings) |
+| `GITHUB_TOKEN` | — | Raises the GitHub API rate limit |
+| `GITLAB_TOKEN` | — | Raises the GitLab API rate limit |
+
+**API keys are optional.** The dashboard ships a small **vault**: `GET
+/api/settings` shows which keys are configured (values masked to the last four
+characters) and `POST /api/settings` writes them to
+`~/.spyglass/vault.json`, `0600` on POSIX. Only the keys an exposed module
+actually reads are offered — IntelX and HIBP.
 
 **Non-loopback deployments** must set `SPYGLASS_PRO_TOKEN`; the server warns at
 startup if you don't. While no token is set the dashboard answers only requests
@@ -346,36 +390,62 @@ every response sets `Content-Security-Policy`, `X-Frame-Options`,
 
 ---
 
-## API
+## Usage
 
-Every route is under `/api/*` and requires the Bearer token when
-`SPYGLASS_PRO_TOKEN` is set.
+The dashboard is the primary interface. Everything it does is also a single
+API call.
 
 ```bash
 # What's installed, what's missing, what degraded
 curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:5000/api/status
 
-# Run a module
+# Run one module
 curl "http://127.0.0.1:5000/api/spyglass/run?module=website&target=example.com" \
      -H "Authorization: Bearer $TOKEN"
 
-# Correlated multi-input investigation
+# Resolve a person: website + email + phone in one pass
 curl -X POST http://127.0.0.1:5000/api/investigate/run \
      -H "Authorization: Bearer $TOKEN" \
      -H "Content-Type: application/json" \
-     -d '{"website":"example.com","email":"user@example.com"}'
+     -d '{"website":"example.com","email":"user@example.com","phone":"+14155552671"}'
 
 # Stored-run queries
 curl "http://127.0.0.1:5000/api/cases/diff?target=example.com&qtype=website" \
      -H "Authorization: Bearer $TOKEN"
 ```
 
+**What the identity response looks like** — the `person` block sits next to the
+raw payloads, and the dashboard renders it as the person card:
+
+```json
+{
+  "person": {
+    "schema": "spyglass.person/1",
+    "confidence": "medium",
+    "anchors": [{"kind": "email", "value": "user@example.com", "source": "input"}],
+    "accounts": [{"platform": "github", "handle": "octocat", "confidence": "high", "tools": ["user-scanner", "sherlock"]}],
+    "links": [{"kind": "email-localpart", "detail": "shared local part", "confidence": "possible"}],
+    "conflicts": [],
+    "context": {"website": "example.com"}
+  }
+}
+```
+
+The `person` block is **additive**: the raw payload stays authoritative, and a
+run that failed carries no `person` block at all — absence, not null filler.
+
+---
+
+## API
+
+Every route is under `/api/*` and requires the Bearer token when
+`SPYGLASS_PRO_TOKEN` is set.
+
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/status` | Engines, platforms, per-tool availability, `missing_tools`, `degraded` |
 | `GET /api/spyglass/run` | Run one spyglass module (`module`, `target`, + flags) |
-| `GET /api/lens/run` | Lens-Extender passive recon |
-| `POST /api/investigate/run` | Parallel multi-input investigation |
+| `POST /api/investigate/run` | Parallel multi-input investigation with the person model |
 | `GET /api/social/platforms` | Registered adapters and their capabilities |
 | `POST /api/social/run` | Collect one social profile |
 | `GET /api/cases` · `/diff` · `/timeline` · `/profile` | Stored-run queries |
@@ -387,13 +457,15 @@ curl "http://127.0.0.1:5000/api/cases/diff?target=example.com&qtype=website" \
 
 A busy server returns **HTTP 429** for a full job queue, distinct from a scan
 that ran and failed — so a client can tell back-pressure from a broken payload.
+A module that is not part of this build answers **HTTP 400** and names the
+reason.
 
 ---
 
 ## Cases
 
 Every scan can be stored. Stored runs keep a full result snapshot plus an
-entity index (domains, IPs, emails, phones, orgs, onions, breaches), which is
+entity index (domains, IPs, e-mails, phones, orgs, onions, breaches), which is
 what the **Stored Cases** panel reads:
 
 - **Diff last two runs** — entities that appeared or disappeared since the
@@ -404,7 +476,7 @@ what the **Stored Cases** panel reads:
 
 Data at rest is encrypted with Fernet when `SPYGLASS_STORE_KEY` or
 `SPYGLASS_STORE_PASS` is set; otherwise it is stored in plaintext. This covers
-both the result snapshot and the entity index (domains, IPs, emails, orgs) —
+both the result snapshot and the entity index (domains, IPs, e-mails, orgs) —
 the index rows hold the same targets, so encrypting one without the other would
 leak them. JSON/CSV/report artifacts from a scan land in the working directory
 of the run.
@@ -417,16 +489,16 @@ of the run.
 .venv/bin/python tests/run_tests.py
 ```
 
-**545 offline checks** — the three engines' own suites plus the merge layer
+**627 offline checks** — the vendored engines' own suites plus the merge layer
 (API surface, auth gate, request-origin gate, proxy validation and masking,
-job pool, target validation incl. IPv6, entity encryption, case queries,
-cross-platform filename and decoding behaviour) and the node-checked dashboard
-JS. No network, no browser, finishes in a few seconds.
+job pool, target validation, the exposure boundary, identity resolution, the
+vault, entity encryption, case queries, cross-platform filename and decoding
+behaviour) and the node-checked dashboard JS. No network, no browser, finishes
+in a few seconds.
 
 CI runs the suite on Python 3.10–3.13 (plus macOS and Windows), type-checks
 with `mypy`, lints with `ruff`, `node --check`s the dashboard JS, and asserts
-the built wheel actually carries `LICENSE`, `NOTICE` and all three vendored
-engines.
+the built wheel actually carries `LICENSE`, `NOTICE` and the vendored engines.
 
 ---
 
@@ -434,8 +506,8 @@ engines.
 
 macOS, Linux and Windows are supported. CI runs the suite on Ubuntu
 (Python 3.10–3.13) and macOS; Windows ships documented fallbacks for the
-tools it lacks. Two platform differences are worth knowing before you file
-a bug:
+tools it lacks. Two platform differences are worth knowing before you file a
+bug:
 
 - **Windows has no `dig` or `whois`.** The DNS legs fall back to Python's
   resolver and the HTTP legs to `urllib`, so the modules still run — but DNS
@@ -447,16 +519,21 @@ a bug:
 
 ---
 
-## Project structure
+## Repository structure
 
 ```
 run.py                     dev entry point
 scripts/install_tools.py   idempotent CLI-engine installer
-tests/                     545 offline checks (run_tests.py)
+tests/                     627 offline checks (run_tests.py)
 assets/logo.svg            README logo
+docs/screenshots/          dashboard screenshot
 spyglass_pro/
-  app.py                   Flask routes + auth gate + proxy validation
+  app.py                   Flask routes + auth gate + scope boundary
   runner.py                job pool (queue cap, timeouts), engine dispatch
+  identity.py              person resolution (spyglass.person/1)
+  facts.py                 normalized fact layer
+  vault.py                 API-key vault (~/.spyglass/vault.json)
+  scope.py                 what this build exposes — and what it refuses
   social/                  multi-platform social harness (schema, registry,
                            adapters) — merge layer, not vendored
   cli.py                   `spyglass-pro` console entry point
@@ -464,17 +541,25 @@ spyglass_pro/
   modules/                 vendored engines (see NOTICE)
 ```
 
-The three engines live behind a directory boundary on purpose, so the next sync
-from upstream is mechanical. `NOTICE` records exactly where each copy differs
-from its origin — including the bug fixes that exist only here.
+The vendored engines live behind a directory boundary on purpose, so the next
+sync from upstream is mechanical. `NOTICE` records exactly where each copy
+differs from its origin — including the bug fixes that exist only here.
 
 ---
 
 ## Contributing
 
-Read [CONTRIBUTING.md](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/CONTRIBUTING.md). The short version: **the passive-only
-rule overrides everything else**, new behaviour needs a test that fails without
-it, and a partial result must never look like a complete one.
+Contributions are welcome.
+
+1. Fork the repository and create a branch (`git checkout -b feat/my-feature`).
+2. Read [CONTRIBUTING.md](CONTRIBUTING.md) — the short version: **the
+   passive-only rule overrides everything else**, new behaviour needs a test
+   that fails without it, and a partial result must never look like a
+   complete one.
+3. Install the dev tools: `pip install -e ".[dev]"`.
+4. Run the quality gate: `.venv/bin/python tests/run_tests.py`,
+   `.venv/bin/ruff check .` and `.venv/bin/mypy spyglass_pro`.
+5. Open a pull request.
 
 ---
 
@@ -496,7 +581,7 @@ You are responsible for compliance with applicable laws.
 
 ## License
 
-MIT — see [LICENSE](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/LICENSE). One copyright holder covers this repository in
-full, including the engines under `spyglass_pro/modules/`; [NOTICE](https://github.com/Ahmad170412/Spyglass-PRO/blob/main/NOTICE)
+MIT — see [LICENSE](LICENSE). One copyright holder covers this repository in
+full, including the engines under `spyglass_pro/modules/`; [NOTICE](NOTICE)
 records where those came from and why they are kept behind a directory
 boundary.

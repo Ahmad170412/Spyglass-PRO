@@ -121,6 +121,18 @@ jobs:
               || { echo "MISSING vendored package: $pkg"; exit 1; }
           done
           echo "wheel carries LICENSE, NOTICE, MIT metadata and all three vendored engines"
+      - name: The sdist must not carry local working drafts
+        # MANIFEST.in does not read .gitignore: a draft that is ignored in git
+        # can still be copied into the sdist by `python -m build`.
+        run: |
+          set -euo pipefail
+          sdist=$(ls dist/*.tar.gz)
+          if tar tzf "$sdist" | grep -q "docs/PLAN-"; then
+            echo "FAIL: the sdist carries a local working draft:"
+            tar tzf "$sdist" | grep "docs/PLAN-"
+            exit 1
+          fi
+          echo "sdist carries no working drafts"
       - uses: actions/upload-artifact@v4
         with:
           name: dist

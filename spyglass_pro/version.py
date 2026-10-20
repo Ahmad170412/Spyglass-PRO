@@ -7,4 +7,4 @@ one version for the distribution and the app, so ``pip show`` and
 ``/api/status`` can never disagree.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.5.0"
