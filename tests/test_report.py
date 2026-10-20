@@ -72,6 +72,47 @@ class RenderInvestigationTest(unittest.TestCase):
         self.assertIn("### Correlations", md)
         self.assertIn("MATCH", md)
 
+    def test_person_section_precedes_the_module_dossier(self):
+        r = {
+            "person": {
+                "schema": "spyglass.person/1",
+                "confidence": "high",
+                "counts": {"anchors": 2, "accounts": 1, "confirmed_links": 1,
+                           "possible_links": 1, "conflicts": 1, "breaches": 1},
+                "names": [{"value": "Analyst", "source": "instagram", "confidence": "high"}],
+                "emails": [{"value": "a@x.com", "source": "input", "confidence": "high"}],
+                "accounts": [{"platform": "github.com", "url": "https://github.com/a",
+                              "via": ["email", "username"],
+                              "tools": ["holehe", "user-scanner"], "confidence": "high"}],
+                "breaches": [{"name": "LeakDB", "date": "2021", "via": ["email"]}],
+                "exposed_fields": ["email"],
+                "links": [
+                    {"kind": "whois-email", "desc": "Known email found in website WHOIS",
+                     "detail": "a@x.com", "confidence": "high"},
+                    {"kind": "handle-reuse", "desc": "Same handle, not proof",
+                     "confidence": "possible"},
+                ],
+                "conflicts": [{"kind": "location", "desc": "Berlin differs from Russia"}],
+                "context": {"website": "x.com", "emails": ["legal@x.com"]},
+                "notes": ["WHOIS values describe the domain."],
+            },
+            "inputs": {"email": "a@x.com"},
+            "entities": {"domains": ["x.com"]},
+            "correlations": [],
+            "results": {},
+        }
+        md = report.render(r, "investigation", "a@x.com")
+        self.assertIn("## Person", md)
+        self.assertIn("### Identity", md)
+        self.assertIn("| Platform | URL | Linked by | Tools | Evidence |", md)
+        self.assertIn("github.com", md)
+        self.assertIn("holehe", md)
+        self.assertIn("**POSSIBLE:**", md)
+        self.assertIn("### Conflicts", md)
+        self.assertIn("### Domain context", md)
+        self.assertIn("not necessarily the person", md)
+        self.assertLess(md.index("## Person"), md.index("### Known inputs"))
+
 
 class RenderOpsecTest(unittest.TestCase):
     def test_recommendations_rendered(self):

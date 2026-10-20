@@ -111,10 +111,24 @@ def email(target):
     get = _pick(u, bb)
 
     both = (h & uk) | (h & bsk) | (uk & bsk)
+
+    # Per-row provenance: which engines actually matched this domain. The
+    # bucket alone only says "one" or "2+", which cannot be shown as a tool
+    # name in the UI. Listing the exact set keeps the display honest without
+    # changing the bucket contract older runs and exports already use.
+    def engines(domain):
+        return [name for name, members in (
+            ("holehe", h), ("user-scanner", uk), ("blackbird", bsk),
+        ) if domain in members]
+
     return {
-        "both":             [{"domain": d, "url": get(d)} for d in sorted(both)],
-        "holehe_only":      [{"domain": d} for d in sorted(h - uk - bsk)],
-        "user_scanner_only":[{"domain": d, "url": u[d]} for d in sorted(uk - h - bsk)],
-        "blackbird_only":   [{"domain": d, "url": bb[d]} for d in sorted(bsk - h - uk)],
+        "both":             [{"domain": d, "url": get(d), "engines": engines(d)}
+                             for d in sorted(both)],
+        "holehe_only":      [{"domain": d, "engines": engines(d)}
+                             for d in sorted(h - uk - bsk)],
+        "user_scanner_only":[{"domain": d, "url": u[d], "engines": engines(d)}
+                             for d in sorted(uk - h - bsk)],
+        "blackbird_only":   [{"domain": d, "url": bb[d], "engines": engines(d)}
+                             for d in sorted(bsk - h - uk)],
         "breach":           br,
     }

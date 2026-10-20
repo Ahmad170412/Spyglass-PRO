@@ -217,6 +217,34 @@ class TargetValidationTest(unittest.TestCase):
             self.assertIsNone(runner._validate_target(module, target),
                               f"{module} wrongly rejected {target!r}")
 
+    def test_website_rejects_direct_ips(self):
+        """1.3 website recon is domain-only — a bare IP is not a website."""
+        for target in ("8.8.8.8", "1.1.1.1", "http://8.8.8.8/",
+                       "https://8.8.8.8/path", "[::1]", "https://[::1]/",
+                       "2001:4860:4860::8888"):
+            err = runner._validate_target("website", target)
+            self.assertIsNotNone(err, target)
+            self.assertIn("IP address", err)
+
+    def test_website_accepts_domains_and_urls(self):
+        for target in ("example.com", "sub.domain.co.uk",
+                       "https://example.com", "http://example.com/path?q=1",
+                       "https://sub.example.co.uk:8443/a/b"):
+            self.assertIsNone(runner._validate_target("website", target), target)
+
+    def test_website_rejects_email_and_non_http_schemes(self):
+        for target in ("a@example.com", "ftp://example.com",
+                       "javascript:alert(1)", "localhost"):
+            self.assertIsNotNone(runner._validate_target("website", target), target)
+
+    def test_website_url_normalises_to_host(self):
+        """A pasted URL and its bare host are one case, not two."""
+        self.assertEqual(runner._website_host("https://example.com/path?q=1"),
+                         "example.com")
+        self.assertEqual(runner._website_host("example.com"), "example.com")
+        self.assertEqual(runner._website_host("sub.example.co.uk:8443/x"),
+                         "sub.example.co.uk")
+
     def test_run_spyglass_rejects_before_dispatch(self):
         """The rejection happens before a handler runs, so no subprocess starts."""
         with mock.patch.dict(runner._SPYGLASS_HANDLERS,

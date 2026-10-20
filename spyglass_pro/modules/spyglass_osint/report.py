@@ -55,7 +55,7 @@ _ACRONYMS = {
     "dmarc": "DMARC", "dnssec": "DNSSEC", "dkim": "DKIM", "san": "SAN",
     "tls": "TLS", "csp": "CSP", "mmh3": "MMH3", "sha256": "SHA256",
     "caa": "CAA", "whois": "WHOIS", "axfr": "AXFR", "ptr": "PTR",
-    "api": "API", "cdn": "CDN", "crt": "CRT", "js": "JS", "css": "CSS",
+    "api": "API", "cdn": "CDN", "crt": "CRT", "ct": "CT", "js": "JS", "css": "CSS",
     "html": "HTML", "ssl": "SSL", "id": "ID", "os": "OS",
 }
 
@@ -182,9 +182,13 @@ def _render_phone(r: dict) -> list[str]:
 
 
 def _render_website(r: dict) -> list[str]:
+    """Light website report: owner/WHOIS, basic DNS, certificate transparency."""
     lines = []
     if "error" in r:
         return [f"> {r['error']}", ""]
+    whois = r.get("whois", {})
+    if whois:
+        lines += _kv_section("WHOIS", whois)
     dns = r.get("dns_records", {})
     if dns:
         lines += _kv_section("DNS records", dns)
@@ -194,55 +198,11 @@ def _render_website(r: dict) -> list[str]:
     wc = r.get("wildcard_dns", {})
     if wc:
         lines += _kv_section("Wildcard DNS", wc)
-    subs = r.get("subdomains")
-    if subs:
-        lines += _section("Subdomains (unified)", subs)
-    srcs = r.get("subdomain_sources", {})
-    if srcs:
-        lines += _kv_section("Subdomain sources", srcs)
-    for key, label in (
-        ("wayback_subdomains", "Subdomains (Wayback Machine)"),
-        ("crt_sh_subdomains", "Subdomains (certificate transparency)"),
-        ("shodan", "Shodan"),
-        ("js_interesting", "JavaScript interesting strings"),
-        ("reverse_dns", "Reverse DNS"),
-        ("ptr_sweep", "Reverse DNS sweep (/24)"),
-    ):
-        items = r.get(key)
-        if items:
-            lines += _section(label, items)
-    headers = r.get("http_headers", {})
-    if headers:
-        lines += _kv_section("HTTP headers", headers)
-    sec = r.get("security_headers", {})
-    if sec:
-        lines += _kv_section("Security headers", sec)
-    if r.get("cookies"):
-        lines += _section("Cookies", r["cookies"])
-    if r.get("csp_domains"):
-        lines += _section("CSP domains", r["csp_domains"])
-    if r.get("technologies"):
-        lines += _section("Technologies", r["technologies"])
-    fav = r.get("favicon", {})
-    if fav:
-        lines += _kv_section("Favicon", fav)
-    tls = r.get("tls", {})
-    if tls:
-        lines += _kv_section("TLS", tls)
-    whois = r.get("whois", {})
-    if whois:
-        lines += _kv_section("WHOIS", whois)
-    hist = r.get("history", {})
-    if hist:
-        lines += _kv_section("Wayback history", hist)
+    ct = r.get("ct")
+    if ct:
+        lines += _section("Certificate transparency", ct)
     covered = {
-        "dns_records", "dns_email_security", "wildcard_dns",
-        "subdomains", "subdomain_sources", "wayback_subdomains",
-        "crt_sh_subdomains", "shodan",
-        "directories", "interesting_files", "robots", "sitemap",
-        "js_endpoints", "js_interesting", "reverse_dns", "ptr_sweep",
-        "http_headers", "security_headers", "cookies", "csp_domains",
-        "technologies", "favicon", "tls", "whois", "history",
+        "whois", "dns_records", "dns_email_security", "wildcard_dns", "ct",
     }
     leftover = {k: v for k, v in r.items() if k not in covered and k != "error"}
     if leftover:
@@ -401,8 +361,132 @@ def _render_opsec(r: dict) -> list[str]:
     return lines
 
 
+def _person_values(items) -> list[str]:
+    """Flatten identity entries for a Markdown line."""
+    out = []
+    for item in items or []:
+        if isinstance(item, dict):
+            value = item.get("value")
+            if not value:
+                continue
+            source = item.get("source")
+            confidence = item.get("confidence")
+            suffix = f" ({source})" if source else ""
+            if confidence in ("medium", "possible"):
+                suffix += f" [{confidence}]"
+            out.append(f"{value}{suffix}")
+        elif item:
+            out.append(str(item))
+    return out
+
+
+def _person_cell(value) -> str:
+    return str(value or "").replace("|", "\\|")
+
+
+def _render_person(person: dict) -> list[str]:
+    """The resolved identity, ahead of the per-module dossier sections."""
+    lines = ["## Person", ""]
+    counts = person.get("counts") or {}
+    lines.append(f"- **Identity confidence:** {person.get('confidence', 'unconfirmed')}")
+    lines.append(
+        f"- **Anchors:** {counts.get('anchors', 0)} · "
+        f"**Accounts:** {counts.get('accounts', 0)} · "
+        f"**Confirmed links:** {counts.get('confirmed_links', 0)} · "
+        f"**Possible leads:** {counts.get('possible_links', 0)} · "
+        f"**Conflicts:** {counts.get('conflicts', 0)}")
+    lines.append("")
+
+    identity = [
+        ("Names", _person_values(person.get("names"))),
+        ("Handles", _person_values(person.get("handles"))),
+        ("Emails", _person_values(person.get("emails"))),
+        ("Phones", _person_values(person.get("phones"))),
+        ("Locations", _person_values(person.get("locations"))),
+        ("Organizations", _person_values(person.get("organizations"))),
+        ("Domains", _person_values(person.get("domains"))),
+        ("Websites", _person_values(person.get("websites"))),
+    ]
+    if any(values for _, values in identity):
+        lines += ["### Identity", ""]
+        for label, values in identity:
+            if values:
+                lines.append(f"- **{label}:** {', '.join(values)}")
+        lines.append("")
+
+    accounts = person.get("accounts") or []
+    if accounts:
+        lines += [f"### Accounts ({len(accounts)})", "",
+                  "| Platform | URL | Linked by | Tools | Evidence |",
+                  "| --- | --- | --- | --- | --- |"]
+        for account in accounts:
+            lines.append(
+                f"| {_person_cell(account.get('platform'))} "
+                f"| {_person_cell(account.get('url'))} "
+                f"| {_person_cell(', '.join(account.get('via') or []))} "
+                f"| {_person_cell(', '.join(account.get('tools') or []))} "
+                f"| {_person_cell(account.get('confidence'))} |")
+        lines.append("")
+
+    breaches = person.get("breaches") or []
+    if breaches:
+        lines += [f"### Breach sources ({len(breaches)})", "",
+                  "| Source | Date | Via |", "| --- | --- | --- |"]
+        for breach in breaches:
+            lines.append(
+                f"| {_person_cell(breach.get('name'))} "
+                f"| {_person_cell(breach.get('date'))} "
+                f"| {_person_cell(', '.join(breach.get('via') or []))} |")
+        lines.append("")
+        fields = person.get("exposed_fields") or []
+        if fields:
+            lines.append(f"- **Exposed fields:** {', '.join(fields)}")
+            lines.append("")
+
+    links = person.get("links") or []
+    if links:
+        lines += [f"### Identity links ({len(links)})", ""]
+        for link in links:
+            badge = str(link.get("confidence") or "medium").upper()
+            detail = link.get("detail")
+            lines.append(f"- **{badge}:** {link.get('desc', '')}"
+                         + (f" — `{detail}`" if detail else ""))
+        lines.append("")
+
+    conflicts = person.get("conflicts") or []
+    if conflicts:
+        lines += [f"### Conflicts ({len(conflicts)})", ""]
+        for conflict in conflicts:
+            lines.append(f"- **{str(conflict.get('kind', 'conflict')).upper()}:** "
+                         f"{conflict.get('desc', '')}")
+        lines.append("")
+
+    context = person.get("context") or {}
+    if context:
+        lines += ["### Domain context", "",
+                  "_WHOIS describes the domain, not necessarily the person._", ""]
+        for key in ("website", "organizations", "names", "emails", "phones", "locations"):
+            value = context.get(key)
+            if not value:
+                continue
+            if isinstance(value, (list, tuple)):
+                value = ", ".join(str(item) for item in value)
+            lines.append(f"- **{_key_label(key)}:** {value}")
+        lines.append("")
+
+    notes = person.get("notes") or []
+    if notes:
+        lines += ["### Identity notes", ""]
+        lines.extend(f"- {note}" for note in notes)
+        lines.append("")
+    return lines
+
+
 def _render_investigation(r: dict) -> list[str]:
     lines = []
+    person = r.get("person")
+    if isinstance(person, dict):
+        lines += _render_person(person)
     inputs = r.get("inputs", {})
     if inputs:
         lines += _kv_section("Known inputs", inputs)

@@ -9,7 +9,7 @@ from urllib.parse import urlparse, urlsplit
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
-from spyglass_pro import __version__, runner
+from spyglass_pro import __version__, runner, scope
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 # Random per-process key unless explicitly configured. The dashboard
@@ -43,9 +43,7 @@ _TOOL_PROBES = {
     "phoneinfoga": ("phoneinfoga",),
     "dig": ("dig",),
     "whois": ("whois",),
-    "shodan": ("shodan",),
     "exiftool": ("exiftool",),
-    "curl": ("curl",),
 }
 
 
@@ -270,7 +268,7 @@ def _security_headers(resp):
         "default-src 'self'; "
         "script-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com data:; "
+        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; "
         "img-src 'self' data: https:; "
         "connect-src 'self'; "
         "object-src 'none'; base-uri 'self'; form-action 'self'; "
@@ -322,8 +320,11 @@ def api_status():
         "proxy": _mask_proxy(os.environ.get("SPYGLASS_PROXY", "")),
         "engines": {
             "spyglass": {"available": True, "label": "Spyglass-OSINT"},
+            # Lens is kept in-tree for the sibling tool but has no product
+            # surface in 1.3. Report it honestly instead of pretending it
+            # is a live engine.
             "lens_extender": {"available": _module_imports("lens_extender"),
-                              "label": "Lens-Extender"},
+                              "label": "Lens-Extender", "dormant": True},
             "social": {"available": _module_imports("instacloak"),
                        "label": "Social harness"},
         },
@@ -373,8 +374,9 @@ _TOOLS_LEGS = {
     "email": ["holehe", "user-scanner", "blackbird"],
     "username": ["user-scanner", "sherlock", "maigret", "blackbird"],
     "phone": ["ignorant", "phoneinfoga"],
-    "website": ["dig", "whois", "curl"],
-    "ip": ["shodan"],
+    # Light website only: owner/registrant, WHOIS, DNS and CT. `curl` went
+    # with the page/header fetch.
+    "website": ["dig", "whois"],
     "metadata": ["exiftool"],
 }
 
@@ -534,12 +536,17 @@ def api_proxy():
 
 @app.route("/api/spyglass/run")
 def api_spyglass_run():
-    """Run one Spyglass-OSINT module (email/username/phone/website/
-    darkweb/ip/opsec/metadata). Extra query params become module flags
-    (json/csv/report/store, darkweb type hint, ip ports)."""
+    """Run one exposed Spyglass-OSINT module (email/username/phone/
+    website/darkweb/opsec/metadata). Extra query params become module
+    flags (json/csv/report/store, darkweb type hint)."""
     module = request.args.get("module", "")
     if not module:
         return jsonify({"error": "module parameter required"})
+    # Dormant code stays in-tree but has no product surface. Refuse it
+    # here, where every operator request lands, with wording that names
+    # the reason instead of a bare 404.
+    if scope.is_dormant_module(module):
+        return jsonify({"error": scope.dormant_error("module", module)}), 400
     target = request.args.get("target", "")
     flags = {key: value for key, value in request.args.items()
              if key not in ("module", "target", "async")}
@@ -548,7 +555,9 @@ def api_spyglass_run():
 
 @app.route("/api/lens/run")
 def api_lens_run():
-    """Run Lens-Extender passive recon (Shodan, InternetDB, RDAP, ...)."""
+    """Lens-Extender is dormant in 1.3; the endpoint refuses honestly."""
+    if scope.is_dormant_engine("lens"):
+        return jsonify({"error": scope.dormant_error("engine", "lens")}), 400
     target = request.args.get("target", "")
     if not target:
         return jsonify({"error": "target required"})

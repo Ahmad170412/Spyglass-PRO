@@ -1,6 +1,7 @@
 import concurrent.futures
 import re
 import unicodedata
+from urllib.parse import urlsplit
 
 # Alternate English country names seen in WHOIS `Country:` fields, keyed by
 # ISO-3166 alpha-2. Normalized the same way as _norm_country(). Single-word
@@ -113,8 +114,22 @@ def _country_matches(region_code: str, whois_country: str) -> bool:
                for alias in _COUNTRY_ALIASES.get(code, ()))
 
 
+def _website_host(value):
+    """The host of a website input, so a URL and its bare domain are one case."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = urlsplit(text if "://" in text else "//" + text)
+    except ValueError:
+        return text
+    return (parsed.hostname or "").rstrip(".") or text
+
+
 def investigate(raw_inputs):
     inputs = {k: v.strip() for k, v in raw_inputs.items() if v and v.strip()}
+    if "website" in inputs:
+        inputs["website"] = _website_host(inputs["website"])
     r = {"inputs": inputs}
     results = {}
     entities = {
@@ -210,16 +225,12 @@ def _collect_entities(results, entities):
             if ip and ip.count(".") == 3:
                 entities["ips"].add(ip)
 
-        # Deep-recon additions: subdomains, TLS SANs, CSP, SPF third parties.
-        for key in ("subdomains", "wayback_subdomains", "csp_domains"):
-            for d in wr.get(key, []) or []:
-                d = str(d).strip().lower().rstrip(".")
-                if d and "." in d:
-                    entities["domains"].add(d)
-        tls_san = wr.get("tls", {}).get("san", "")
-        for d in tls_san.split(","):
-            d = d.strip().lower().rstrip(".")
-            if d:
+        # Light-recon additions: certificate-transparency names and the
+        # domains named by SPF. The heavy subdomain/TLS/CSP keys are dormant
+        # in 1.3 and no longer read here.
+        for d in wr.get("ct", []) or []:
+            d = str(d).strip().lower().rstrip(".")
+            if d and "." in d:
                 entities["domains"].add(d)
         spf = wr.get("dns_email_security", {}).get("spf_includes", "")
         for d in spf.split(","):
@@ -228,7 +239,8 @@ def _collect_entities(results, entities):
                 entities["domains"].add(d)
 
         who = wr.get("whois", {})
-        for k in ("Organization", "OrgName", "org", "Org"):
+        for k in ("Organization", "Registrant Organization", "Admin Organization",
+                  "Tech Organization", "OrgName", "org", "Org"):
             if who.get(k):
                 entities["orgs"].add(who[k])
         for email_key in ("Email", "Tech Email", "Admin Email", "Registrant Email",
@@ -245,14 +257,6 @@ def _collect_entities(results, entities):
                 p = p.strip()
                 if p:
                     entities["phones"].add(p)
-
-        for entry in wr.get("shodan", []):
-            parts = entry.replace(" | ", " ").split()
-            for p in parts:
-                if p.startswith("Org:"):
-                    entities["orgs"].add(p[4:])
-                elif p.startswith("AS"):
-                    entities["asns"].add(p)
 
     pr = results.get("phone", {})
     if "error" not in pr:

@@ -235,5 +235,36 @@ class PhaseDnsTest(unittest.TestCase):
         self.assertEqual(out["_ips"], {"1.2.3.4"})
 
 
+class LightCollectTest(unittest.TestCase):
+    """1.3 returns owner/WHOIS, basic DNS and CT — nothing heavier."""
+
+    def test_collect_composes_only_light_keys(self):
+        with mock.patch.object(web, "_reset_caches"), \
+             mock.patch.object(
+                 web, "_phase_dns",
+                 return_value={"dns_records": {"A": "1.2.3.4"},
+                               "wildcard_dns": {"detected": "no",
+                                                "resolves_to": ""}}), \
+             mock.patch.object(
+                 web, "_phase_whois",
+                 return_value={"whois": {"Registrar": "Example Registrar"}}), \
+             mock.patch.object(
+                 web, "_phase_ct",
+                 return_value={"ct": ["www.example.com"]}):
+            out = web._collect("example.com")
+        self.assertEqual(set(out),
+                         {"dns_records", "wildcard_dns", "whois", "ct"})
+        for heavy in ("shodan", "subdomains", "subdomain_sources",
+                      "wayback_subdomains", "history", "reverse_dns",
+                      "crt_sh_subdomains"):
+            self.assertNotIn(heavy, out)
+
+    def test_ct_phase_renames_crt_names(self):
+        with mock.patch.object(web, "_crt_subs",
+                               return_value={"example.com", "www.example.com"}):
+            out = web._phase_ct("example.com")
+        self.assertEqual(out["ct"], ["example.com", "www.example.com"])
+
+
 if __name__ == "__main__":
     unittest.main()

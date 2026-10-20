@@ -48,6 +48,15 @@ class CollectEntitiesTest(unittest.TestCase):
         inv._collect_entities(results, entities)
         self.assertEqual(entities["regions"], {"Singapore"})
 
+    def test_certificate_transparency_names_are_domains(self):
+        results = {"website": {"ct": ["www.example.com", "mail.example.com"],
+                               "whois": {"Registrant Organization": "Acme Ltd"}}}
+        entities = _entities()
+        inv._collect_entities(results, entities)
+        self.assertIn("www.example.com", entities["domains"])
+        self.assertIn("mail.example.com", entities["domains"])
+        self.assertIn("Acme Ltd", entities["orgs"])
+
 
 class CorrelateTest(unittest.TestCase):
     def test_email_domain_matches_website(self):
@@ -155,6 +164,15 @@ class InvestigateTest(unittest.TestCase):
         self.assertIn("x.com", r["entities"]["domains"])
         self.assertIn("a@x.com", r["entities"]["emails"])
 
+    def test_website_url_is_normalized_to_a_host(self):
+        website_mod = imp("website")
+        with mock.patch.object(inv, "_quick_resolve", return_value=None), \
+             mock.patch.object(website_mod, "website", return_value={}) as wm:
+            r = inv.investigate({"website": "https://Example.com/path?q=1"})
+        wm.assert_called_once_with("example.com")
+        self.assertIn("example.com", r["entities"]["domains"])
+        self.assertNotIn("https://Example.com/path?q=1", r["entities"]["domains"])
+
     def test_missing_modules_are_skipped(self):
         email_mod = imp("email")
         username_mod = imp("username")
@@ -186,7 +204,9 @@ class RunnerInputTest(unittest.TestCase):
         self.assertIn("error", r)
         self.assertIn("at least one", r["error"])
 
-    def test_optional_legs_run_when_supplied(self):
+    def test_optional_instagram_leg_runs_when_supplied(self):
+        """The Instagram leg still runs; the IP/Lens leg is dormant in 1.3
+        even when an `ip` key is present in the payload."""
         from spyglass_pro import runner
         with mock.patch.object(inv, "investigate",
                                return_value={"entities": {}, "correlations": []}), \
@@ -194,10 +214,10 @@ class RunnerInputTest(unittest.TestCase):
              mock.patch.object(runner, "run_social", return_value={"ok": "insta"}) as social:
             r = runner.run_investigate({"website": "example.com",
                                         "ip": "8.8.8.8", "insta": "instagram"})
-        lens.assert_called_once_with("8.8.8.8", {"passive": "1"})
+        lens.assert_not_called()
         # The Instagram leg now shares the one social code path.
         self.assertEqual(social.call_args[0][:2], ("instagram", "instagram"))
-        self.assertEqual(r["ip_recon"], {"ok": "lens"})
+        self.assertNotIn("ip_recon", r)
         self.assertEqual(r["social"], {"ok": "insta"})
 
     def test_optional_legs_absent_by_default(self):

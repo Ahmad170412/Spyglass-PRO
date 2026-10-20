@@ -1,9 +1,14 @@
-"""Website reconnaissance for Spyglass — PASSIVE ONLY.
+"""Website reconnaissance for Spyglass — light, PASSIVE ONLY.
 
-This module never opens a connection to the target. It resolves DNS,
-Certificate Transparency logs, WHOIS registries, the Wayback Machine and
-Shodan, and stops there. It does not fetch the target's pages, probe its
-ports, brute-force paths, or enumerate subdomains by dictionary.
+This module never opens a connection to the target. It resolves basic DNS
+records, reads Certificate Transparency logs and queries WHOIS registries,
+and stops there. It does not fetch the target's pages, probe its ports,
+brute-force paths, or enumerate subdomains by dictionary.
+
+Scope in 1.3: owner/registrant + WHOIS, basic DNS, and certificate
+transparency only. Shodan, the aggregated subdomain sweep and Wayback
+history are dormant — their helpers stay in-tree for the sibling tool but
+``_collect`` no longer calls them.
 
 Active collection lives in a separate project. Everything that used to run
 here was removed rather than switched off, so none of it can be re-enabled
@@ -24,15 +29,15 @@ zone transfer. All of those require touching the target.
 
 Design principles
 -----------------
-* No paid APIs and no API keys. Passive sources are crt.sh, CertSpotter,
-  HackerTarget and the Wayback Machine CDX index.
+* No paid APIs and no API keys. The light surface reads crt.sh for
+  certificate transparency and the local ``whois``/``dig`` tools.
 * OPSEC-aware: HTTP goes through curl (which honors --proxy) to third-party
   hosts only; DNS through ``dig`` is routed via torsocks when a proxy is
   active; in-process DNS resolution is only used when no proxy is set, so the
   operator's resolver is never leaked through Tor.
-* dig, curl, whois and shodan are auto-detected and skipped cleanly when
-  absent.
+* dig, curl and whois are auto-detected and skipped cleanly when absent.
 """
+
 
 from __future__ import annotations
 
@@ -558,6 +563,25 @@ def _phase_passive_subs(host):
     return result
 
 
+def _phase_ct(host):
+    """Certificate transparency names (crt.sh) — CT, not enumeration.
+
+    Only the certificate-transparency source is read. The aggregated
+    subdomain sweep (HackerTarget / CertSpotter / Wayback) is dormant with
+    the rest of the infra work; ``_phase_passive_subs`` stays in-tree for
+    the sibling tool.
+    """
+    result = {}
+    try:
+        names = _crt_subs(host)
+    except Exception:
+        names = set()
+    if names:
+        result["ct"] = sorted(names)
+    return result
+
+
+
 def _phase_whois(host):
     """WHOIS. Follow the IANA thin referral to the registry when present."""
     result = {}
@@ -650,51 +674,23 @@ def _collect(target):
     _reset_caches()
     result = {}
 
-    # Every phase here reads third-party sources (DNS, Certificate Transparency,
-    # WHOIS registries, Shodan). Nothing in this module opens a connection to
-    # the target: no page fetch, no port scan, no brute force. See the
-    # "Passive-only" note in the module docstring.
+    # Light website only: owner/registrant (WHOIS), basic DNS, and
+    # certificate transparency. Everything heavier — Shodan, the aggregated
+    # subdomain sweep, Wayback history — is dormant with the rest of the
+    # infra work. No phase here opens a connection to the target: no page
+    # fetch, no port scan, no brute force. See the module docstring.
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         dns_f = pool.submit(_phase_dns, host)
-        subs_f = pool.submit(_phase_passive_subs, host)
         whois_f = pool.submit(_phase_whois, host)
+        ct_f = pool.submit(_phase_ct, host)
         dns = _future_result(dns_f, {})
-        subs = _future_result(subs_f, {})
         whois = _future_result(whois_f, {})
+        ct = _future_result(ct_f, {})
 
-    for phase in (dns, subs, whois):
+    for phase in (dns, whois, ct):
         for key, value in phase.items():
             if not key.startswith("_"):
                 result[key] = value
-
-    # State the dependent phase needs.
-    ips = sorted(set(dns.get("_ips", set())) | set(subs.get("_passive_ips", set())))
-
-    scan = _phase_shodan_ports(ips)
-    for key, value in scan.items():
-        result[key] = value
-
-    # Subdomain assembly — passive sources only.
-    passive_subs = subs.get("_passive_subs", set())
-    sources = dict(subs.get("_sources", {}))
-    all_subs = sorted(passive_subs)
-    if all_subs:
-        result["subdomains"] = all_subs
-        result["subdomain_sources"] = sources
-    crt = subs.get("_crt", set())
-    if crt:
-        result["crt_sh_subdomains"] = sorted(crt)
-    wb = subs.get("_wb", {})
-    if wb.get("subs"):
-        result["wayback_subdomains"] = sorted(wb["subs"])
-
-    # Wayback history (from the CDX call in stage 1).
-    if wb.get("first"):
-        result["history"] = {
-            "first_snapshot": wb["first"],
-            "last_snapshot": wb["last"],
-            "snapshot_count": wb["count"],
-        }
 
     return result
 

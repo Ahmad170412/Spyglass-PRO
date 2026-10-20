@@ -47,9 +47,7 @@
       <li class="nav-item" data-panel="social" data-platform="keybase"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="16" r="4"/><path d="m10.9 13.1 7.1-7.1"/><path d="m15 9 2 2"/><path d="m17.5 6.5 2 2"/></svg></span>Keybase</li>
       <li class="nav-item" data-panel="darkweb"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>Dark Web</li>
 
-      <li class="nav-group">Infrastructure</li>
       <li class="nav-item" data-panel="website"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>Website</li>
-      <li class="nav-item" data-panel="ip"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg></span>IP Address</li>
 
       <li class="nav-group">Investigation</li>
       <li class="nav-item" data-panel="investigate"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg></span>Full Investigation</li>
@@ -207,7 +205,6 @@
             <option value="username">Username</option>
             <option value="phone">Phone</option>
             <option value="domain">Domain</option>
-            <option value="ip">IP</option>
           </select>
         </div>
         <div class="form-row">
@@ -227,11 +224,11 @@
     <!-- Website Panel -->
     <section class="panel" id="panel-website">
       <h2>Website</h2>
-      <p class="panel-desc">Full website recon: DNS, ports, headers, WHOIS, subdomains, and directory discovery.</p>
+      <p class="panel-desc">Light website recon: owner/registrant, WHOIS, DNS records, and certificate transparency. Enter a domain or URL — direct IP addresses are not accepted. Passive only — nothing connects to the target.</p>
       <form class="module-form" id="form-website" data-api="spyglass" data-qtype="website" data-target="websiteTarget" data-results="websiteResults">
         <div class="form-row">
           <label for="websiteTarget">Domain or URL</label>
-          <input type="text" id="websiteTarget" placeholder="example.com" />
+          <input type="text" id="websiteTarget" placeholder="example.com or https://example.com/page" />
         </div>
         <div class="form-row">
           <label>Export</label>
@@ -247,27 +244,8 @@
       <div id="websiteResults" class="results-area"></div>
     </section>
 
-    <!-- IP Panel -->
-    <section class="panel" id="panel-ip">
-      <h2>IP Address</h2>
-      <p class="panel-desc">Long-range IP reconnaissance. Passive only — Shodan, InternetDB, RDAP, RIPEstat, GreyNoise and DNSBL. Nothing connects to the target.</p>
-      <form class="module-form" id="form-ip" data-api="lens" data-target="lensTarget" data-results="lensResults">
-        <div class="form-row">
-          <label for="lensTarget">IP Address or Domain</label>
-          <input type="text" id="lensTarget" placeholder="8.8.8.8" />
-        </div>
-        <div class="form-row">
-          <label>Options</label>
-          <div class="checkbox-row">
-            <label><input type="checkbox" data-flag="passive" checked /> Passive Recon</label>
-            <label><input type="checkbox" data-flag="store" /> Store in Cases</label>
-            <label><input type="checkbox" data-flag="alsoSpyglass" id="ipAlsoSpyglass" /> Also run OSINT IP recon</label>
-          </div>
-        </div>
-        <button type="submit" class="btn btn-primary run-btn">Run IP Recon</button>
-      </form>
-      <div id="lensResults" class="results-area"></div>
-    </section>
+    <!-- IP Panel removed in 1.3: the IP module and Lens-Extender are
+         dormant. Their code stays in-tree for the sibling tool. -->
 
     <!-- Full Investigation Panel -->
     <section class="panel" id="panel-investigate">
@@ -289,10 +267,6 @@
         <div class="form-row">
           <label for="invWebsite">Website / Domain</label>
           <input type="text" id="invWebsite" data-key="website" placeholder="example.com" />
-        </div>
-        <div class="form-row">
-          <label for="invIp">IP Address</label>
-          <input type="text" id="invIp" data-key="ip" placeholder="8.8.8.8" />
         </div>
         <div class="form-row">
           <label for="invInsta">Instagram Username</label>
@@ -376,7 +350,6 @@
             <option value="username">Username</option>
             <option value="phone">Phone</option>
             <option value="website">Website</option>
-            <option value="ip">IP</option>
             <option value="darkweb">Dark Web</option>
             <option value="metadata">Metadata</option>
             <option value="opsec">OPSEC</option>
@@ -387,7 +360,6 @@
             <option value="social_github">Social (GitHub)</option>
             <option value="social_gitlab">Social (GitLab)</option>
             <option value="social_keybase">Social (Keybase)</option>
-            <option value="lens_passive">Lens (passive)</option>
           </select>
         </div>
         <div class="form-row">
@@ -407,6 +379,19 @@
 
   </main>
 </div>
+
+<!-- Confirmation dialog: themed replacement for window.confirm -->
+<dialog class="confirm-dialog" id="confirmDialog" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+  <form method="dialog" class="confirm-panel">
+    <p class="confirm-kicker" id="confirmKicker">Confirm action</p>
+    <h2 class="confirm-title" id="confirmTitle">Are you sure?</h2>
+    <p class="confirm-body" id="confirmBody"></p>
+    <div class="confirm-actions">
+      <button type="submit" value="cancel" class="btn btn-sm btn-outline" id="confirmCancel">Cancel</button>
+      <button type="submit" value="confirm" class="btn btn-sm btn-danger" id="confirmOk">Confirm</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- Toast Container -->
 <div class="toast-container" id="toastContainer"></div>

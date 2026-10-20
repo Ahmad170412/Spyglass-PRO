@@ -21,7 +21,6 @@ _LABEL_TO_QTYPE = {
     "Username": "username",
     "Phone": "phone",
     "Website": "website",
-    "IP address": "ip",
     "Metadata": "metadata",
 }
 
@@ -40,7 +39,7 @@ class ToolGridContractTest(unittest.TestCase):
 
         rows = dict(re.findall(r"label: '([^']+)', tools: \[([^\]]*)\]", self.js))
         self.assertEqual(set(rows), set(_LABEL_TO_QTYPE),
-                         f"UI labels are not the expected six: {sorted(rows)}")
+                         f"UI labels are not the expected five: {sorted(rows)}")
         for label, blob in rows.items():
             qtype = _LABEL_TO_QTYPE[label]
             js_tools = set(re.findall(r"'([^']+)'", blob))
@@ -60,16 +59,14 @@ class ToolGridContractTest(unittest.TestCase):
         self.assertEqual(named, set(_TOOL_PROBES))
 
     def test_key_rows_reference_known_vault_specs(self):
-        """The Dark web / Enrichment rows key their dots off vault spec ids;
-        one typo'd id silently renders as 'open Settings' forever. Every
-        referenced id must be a real spec, and the Dark web row must track
-        that module's keyed sources exactly — enrichment may merge several
-        specs into one dot (the two Censys fields share one), but never
-        invent one."""
+        """The Dark web row keys its dots off vault spec ids; one typo'd id
+        silently renders as 'open Settings' forever. Every referenced id
+        must be a real spec, and the row must track that module's keyed
+        sources exactly — never invent one."""
         from spyglass_pro.app import _SETTINGS_SPEC
         spec_ids = {spec["key"] for spec in _SETTINGS_SPEC}
         key_blobs = re.findall(r"keys: \[\[(.*?)\]\]", self.js)
-        self.assertEqual(len(key_blobs), 2, "expected Dark web + Enrichment rows")
+        self.assertEqual(len(key_blobs), 1, "expected the Dark web row")
         referenced = set()
         for blob in key_blobs:
             referenced.update(re.findall(r"([a-z0-9_]+)', '[^']+'", blob))

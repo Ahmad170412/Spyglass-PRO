@@ -40,6 +40,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from urllib.parse import urlsplit
 
 # The three tools use relative imports internally (except lens_extender,
 # which uses absolute `lens_extender.*` imports), so they must be
@@ -406,7 +407,10 @@ def _sg_website(target, flags, progress):
         from spyglass_osint import website as mod
     except ImportError as exc:
         return {"error": f"website module unavailable: {exc}"}
-    return _finish(mod.website(target), "website", target, flags, progress)
+    # Normalise a pasted URL to its host so `example.com` and
+    # `https://example.com/page` are the same case, not two.
+    host = _website_host(target) or target
+    return _finish(mod.website(target), "website", host, flags, progress)
 
 
 def _sg_darkweb(target, flags, progress):
@@ -532,6 +536,45 @@ def _is_identifier(value):
     return bool(_DOMAIN_RE.match(value))
 
 
+def _website_host(value):
+    """The hostname of a domain/URL target, or None when it cannot be one.
+
+    Shared by validation and the website check so both agree on what a
+    website target is. Rejects control characters, whitespace, userinfo,
+    non-http(s) schemes and malformed URLs; IP-literal detection is the
+    caller's job because the message differs.
+    """
+    if not value or len(value) > MAX_TARGET_LEN:
+        return None
+    if any(ord(ch) < 32 or ch.isspace() for ch in value):
+        return None
+    if "@" in value:  # no userinfo, and an email is not a website
+        return None
+    candidate = value if "://" in value else "//" + value
+    try:
+        parsed = urlsplit(candidate)
+    except ValueError:
+        return None
+    if parsed.scheme and parsed.scheme.lower() not in ("http", "https"):
+        return None
+    host = (parsed.hostname or "").rstrip(".")
+    return host or None
+
+
+def _is_website_target(value):
+    """A domain name or an http(s) URL — never a bare IP literal.
+
+    Website recon is domain-only: the light engine resolves the host through
+    DNS and WHOIS, so an IP address is not a website target.
+    """
+    host = _website_host(value)
+    if not host:
+        return False
+    if _is_ip_literal(host) or _is_ipv4(host):
+        return False
+    return bool(_DOMAIN_RE.match(host))
+
+
 def _validate_target(module, target):
     """Return an error string when (module, target) cannot be a real lookup.
 
@@ -565,6 +608,18 @@ def _validate_target(module, target):
     if module == "ip":
         if not _is_ip_literal(target):
             return f"ip: {target!r} is not an IP address"
+        return None
+
+    if module == "website":
+        # Domain-only: a direct IP is not a website target.
+        host = _website_host(target)
+        if (_is_ip_literal(target) or _is_ipv4(target)
+                or (host and (_is_ip_literal(host) or _is_ipv4(host)))):
+            return (f"website: {target!r} is an IP address; enter a domain "
+                    "name or a website URL instead")
+        if not _is_website_target(target):
+            return (f"website: {target!r} is not a domain name or "
+                    "http(s) URL")
         return None
 
     if module == "username":
@@ -686,8 +741,9 @@ def _spyglass_summary(qtype, target, result):
         if not detail:
             detail = "carrier/geo + breach check complete"
     elif qtype == "website":
-        subs = result.get("subdomains") or []
-        detail = f"{len(subs)} subdomain(s) found" if subs else "DNS/WHOIS recon complete"
+        ct = result.get("ct") or []
+        detail = (f"{len(ct)} CT name(s), owner/WHOIS/DNS"
+                  if ct else "owner/WHOIS/DNS recon complete")
     elif qtype == "ip":
         parts = []
         ports = result.get("open_ports") or []
@@ -818,7 +874,7 @@ _INVESTIGATE_CORE_KEYS = ("email", "username", "phone", "website")
 
 
 def run_investigate(payload):
-    """Correlated multi-input investigation, with optional IP/Instagram legs."""
+    """Correlated multi-input investigation, with an optional Instagram leg."""
     payload = payload or {}
     progress = Progress()
 
@@ -833,6 +889,10 @@ def run_investigate(payload):
     inputs = {key: value for key, value in inputs.items() if value}
     if not inputs:
         return {"error": "provide at least one email, username, phone or website"}
+    # Same normalisation as the single website module, so `example.com` and
+    # `https://example.com/page` are one case and one identity context.
+    if "website" in inputs:
+        inputs["website"] = _website_host(inputs["website"]) or inputs["website"]
     # The single-module path rejects junk before dispatch — the
     # investigation must too, or a 700-character "website" sails past the
     # gate straight into every engine.
@@ -847,14 +907,21 @@ def run_investigate(payload):
     except Exception as exc:
         return {"error": f"investigation failed: {_safe_error(exc)}"}
 
-    # Optional cross-tool legs: passive IP recon via Lens, and a social
-    # profile through the shared harness. Each leg brings its own progress.
-    ip_target = (payload.get("ip") or "").strip()
-    if ip_target:
-        result["ip_recon"] = run_lens(ip_target, {"passive": "1"})
+    # Optional cross-tool leg: a social profile through the shared
+    # harness. IP recon no longer reaches this path — Lens is dormant in
+    # 1.3 and `ip` is not an investigation input.
     insta_target = (payload.get("insta") or "").strip()
     if insta_target:
         result["social"] = run_social("instagram", insta_target, {}, progress=progress)
+
+    # Person resolution is derived, not collected: the raw legs and the
+    # correlation list stay the source of truth, and a bug here must not
+    # cost the caller the run itself.
+    try:
+        from spyglass_pro import identity
+        result["person"] = identity.resolve(inputs, result)
+    except Exception as exc:
+        result["person_error"] = _safe_error(exc)
 
     result["progress"] = progress.lines
     result["summary"] = _investigate_summary(inputs, result)
@@ -885,19 +952,38 @@ def run_investigate(payload):
     return result
 
 
+def _count_phrase(value, singular, plural=None):
+    """'1 conflict', '2 conflicts' — summaries should read like prose."""
+    return f"{value} {singular if value == 1 else (plural or singular + 's')}"
+
+
 def _investigate_summary(inputs, result):
     parts = []
-    entities = result.get("entities") or {}
-    for key, label in (("emails", "email(s)"), ("domains", "domain(s)"),
-                       ("ips", "IP(s)"), ("phones", "phone(s)"),
-                       ("orgs", "org(s)")):
-        values = entities.get(key) or []
-        if values:
-            parts.append(f"{len(values)} {label}")
-    matches = sum(1 for corr in (result.get("correlations") or [])
-                  if isinstance(corr, dict) and corr.get("type") == "match")
-    if matches:
-        parts.append(f"{matches} correlation(s)")
+    person = result.get("person")
+    counts = person.get("counts") if isinstance(person, dict) else None
+    if isinstance(counts, dict):
+        for key, singular, plural in (
+                ("accounts", "account", "accounts"),
+                ("confirmed_links", "confirmed link", "confirmed links"),
+                ("possible_links", "possible lead", "possible leads"),
+                ("conflicts", "conflict", "conflicts"),
+                ("breaches", "breach source", "breach sources")):
+            value = counts.get(key) or 0
+            if value:
+                parts.append(_count_phrase(value, singular, plural))
+    if not parts:
+        entities = result.get("entities") or {}
+        for key, singular, plural in (
+                ("emails", "email", "emails"), ("domains", "domain", "domains"),
+                ("ips", "IP", "IPs"), ("phones", "phone", "phones"),
+                ("orgs", "org", "orgs")):
+            values = entities.get(key) or []
+            if values:
+                parts.append(_count_phrase(len(values), singular, plural))
+        matches = sum(1 for corr in (result.get("correlations") or [])
+                      if isinstance(corr, dict) and corr.get("type") == "match")
+        if matches:
+            parts.append(_count_phrase(matches, "correlation"))
     detail = ", ".join(parts)
     base = "Investigation complete for " + ", ".join(inputs.values())
     return f"{base} — {detail}" if detail else base

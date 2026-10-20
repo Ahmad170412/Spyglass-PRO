@@ -83,8 +83,7 @@ class SchemaContract(unittest.TestCase):
 class EntityExtractionTest(unittest.TestCase):
     def test_target_is_always_an_entity(self):
         for qtype, kind in (("email", "email"), ("username", "username"),
-                           ("phone", "phone"), ("website", "domain"),
-                           ("ip", "ip")):
+                           ("phone", "phone"), ("website", "domain")):
             block = facts.normalize({}, qtype, "value-goes-here")
             self.assertIn(
                 {"kind": kind, "value": "value-goes-here", "source": "target"},
@@ -105,7 +104,7 @@ class EntityExtractionTest(unittest.TestCase):
         """The case store's extractor is the one true entity source —
         reusing it keeps graph and entity index agreeing."""
         block = facts.normalize(
-            {"subdomains": ["a.example.com"], "dns_records": {"A": "1.2.3.4"},
+            {"ct": ["a.example.com"], "dns_records": {"A": "1.2.3.4"},
              "whois": {"Organization": "Acme Ltd"}},
             "website", "example.com")
         self.assertIn("a.example.com", _entity_values(block, "domain"))
@@ -175,6 +174,19 @@ class FactExtractionTest(unittest.TestCase):
         self.assertIsNotNone(fact)
         self.assertIs(fact["value"], False)
         self.assertEqual(_fact(block, "recommendations")["value"], 1)
+
+    def test_investigation_person_counts_become_facts(self):
+        block = facts.normalize(
+            {"entities": {}, "correlations": [], "results": {},
+             "person": {"confidence": "high",
+                        "counts": {"accounts": 3, "confirmed_links": 2,
+                                   "possible_links": 1, "conflicts": 0}}},
+            "investigation", "a@x.com")
+        self.assertEqual(_fact(block, "person_accounts")["value"], 3)
+        self.assertEqual(_fact(block, "person_confirmed_links")["value"], 2)
+        self.assertEqual(_fact(block, "person_confidence")["value"], "high")
+        # A reported zero conflict count is a finding, not an absent value.
+        self.assertEqual(_fact(block, "person_conflicts")["value"], 0)
 
     def test_investigation_legs_exclude_errored_legs(self):
         block = facts.normalize(

@@ -35,7 +35,8 @@ sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(APP_JS, 'utf8'), sandbox, { filename: 'app.js' });
 
-const { escapeHtml, emptyCases, renderCaseDiff, renderCaseTimeline, renderCaseProfile } = sandbox;
+const { escapeHtml, emptyCases, renderCaseDiff, renderCaseTimeline, renderCaseProfile,
+        confirmAction, deleteCase } = sandbox;
 
 let pass = 0;
 let fail = 0;
@@ -60,6 +61,16 @@ check('filtered empty state offers a reset', filtered.includes('casesResetQtype'
 const unfiltered = emptyCases({ target: 'a@b.com' }, '', 'timeline');
 check('unfiltered empty state omits the filter hint',
       !unfiltered.includes('casesResetQtype'), unfiltered);
+
+console.log('== case deletion uses the themed dialog ==');
+
+check('deleteCase no longer calls window.confirm',
+      !deleteCase.toString().includes('window.confirm'), deleteCase.toString());
+check('deleteCase routes through confirmAction',
+      deleteCase.toString().includes('confirmAction'), deleteCase.toString());
+check('confirmAction drives the themed dialog',
+      confirmAction.toString().includes('confirmDialog') &&
+      confirmAction.toString().includes('showModal'), confirmAction.toString());
 
 console.log('== timeline ==');
 
@@ -327,26 +338,24 @@ const registryFetchTest = (async function () {
 
 console.log('== preflight names the upgrade ==');
 (function () {
-  sandbox.STATUS = { tools: { shodan: true }, degraded: {}, platforms: [], engines: {} };
+  sandbox.STATUS = { tools: { dig: true, whois: true }, degraded: {}, platforms: [], engines: {} };
   sandbox.SETTINGS_CACHE = { keys: [
-    { key: 'shodan_api_key', configured: false },
-    { key: 'virustotal_api_key', configured: true },
-    { key: 'abuseipdb_api_key', configured: false },
+    { key: 'intelx_api_key', configured: false },
+    { key: 'hibp_api_key', configured: true },
   ] };
-  const pf = sandbox.preflightHtml('ip');
-  check('names the missing keys', pf.includes('Shodan') && pf.includes('AbuseIPDB'), pf);
-  check('names what each key unlocks', pf.includes('open ports') && pf.includes('abuse confidence'), pf);
+  const pf = sandbox.preflightHtml('darkweb');
+  check('names the missing keys', pf.includes('IntelX'), pf);
+  check('names what each key unlocks', pf.includes('paste + breach archive'), pf);
   check('stays partial', pf.includes('PARTIAL POWER'), pf);
   sandbox.SETTINGS_CACHE = { keys: [
-    { key: 'shodan_api_key', configured: true },
-    { key: 'virustotal_api_key', configured: true },
-    { key: 'abuseipdb_api_key', configured: true },
+    { key: 'intelx_api_key', configured: true },
+    { key: 'hibp_api_key', configured: true },
   ] };
-  const fullKeys = sandbox.preflightHtml('ip');
-  check('no upgrade hint when nothing is missing', !fullKeys.includes('add Shodan'), fullKeys);
+  const fullKeys = sandbox.preflightHtml('darkweb');
+  check('no upgrade hint when nothing is missing', !fullKeys.includes('add IntelX'), fullKeys);
   sandbox.SETTINGS_CACHE = null;
-  const unknown = sandbox.preflightHtml('ip');
-  check('unknown vault guesses nothing', !unknown.includes('add Shodan') && unknown.includes('Settings'), unknown);
+  const unknown = sandbox.preflightHtml('darkweb');
+  check('unknown vault guesses nothing', !unknown.includes('add IntelX') && unknown.includes('Settings'), unknown);
   sandbox.STATUS = null;
   sandbox.SETTINGS_CACHE = null;
 })();
@@ -376,6 +385,102 @@ console.log('== investigation: verdict first, links lit ==');
   check('graph and chips escape input', !injected.includes('<img'), injected.slice(0, 300));
 })();
 
+console.log('== person card: identity first, engines and context visible ==');
+(function () {
+  const person = {
+    confidence: 'high',
+    counts: { anchors: 2, accounts: 1, confirmed_links: 1, possible_links: 1,
+              conflicts: 1, breaches: 1 },
+    anchors: [{ kind: 'email', value: 'analyst@example.com', source: 'input' },
+              { kind: 'username', value: 'analyst', source: 'input' }],
+    names: [{ value: 'Analyst', source: 'instagram', confidence: 'high' }],
+    handles: [{ value: 'analyst', source: 'input', confidence: 'high' }],
+    emails: [{ value: 'analyst@example.com', source: 'input', confidence: 'high' }],
+    phones: [], locations: [], organizations: [],
+    domains: [{ value: 'example.com', source: 'input website',
+                confidence: 'medium', context: true }],
+    websites: [],
+    accounts: [{ platform: 'github.com', url: 'https://github.com/analyst',
+                 via: ['email', 'username'], tools: ['holehe', 'user-scanner'],
+                 confidence: 'high' }],
+    breaches: [{ name: 'LeakDB', date: '2021', via: ['email'] }],
+    exposed_fields: ['email'],
+    links: [
+      { kind: 'whois-email', desc: 'Known email found in website WHOIS',
+        detail: 'analyst@example.com', confidence: 'high' },
+      { kind: 'handle-reuse',
+        desc: 'Handle @analyst appears on 3 platforms — same handle, not proof of one person',
+        detail: 'github.com, mastodon.social', confidence: 'possible' },
+    ],
+    conflicts: [{ kind: 'location',
+                  desc: 'Profile location "Berlin" differs from WHOIS country "Russia"',
+                  values: ['Berlin', 'Russia'] }],
+    context: { website: 'example.com', organizations: ['Acme Ltd'],
+               emails: ['legal@example.com'] },
+    notes: ['WHOIS values describe the domain, not necessarily the person.'],
+  };
+  const data = {
+    inputs: { email: 'analyst@example.com', username: 'analyst' },
+    entities: { emails: ['analyst@example.com'], domains: ['github.com'] },
+    correlations: [{ type: 'match', desc: 'Email domain matches website target',
+                     detail: 'example.com' }],
+    results: { email: { both: [{ domain: 'github.com', url: 'https://github.com/analyst',
+                                 engines: ['holehe', 'user-scanner'] }] } },
+    social: { platform: 'instagram', handle: 'analyst', found: true,
+              display_name: 'Analyst', source: 'browser', logged_in: false },
+    person: person,
+  };
+  const card = sandbox.renderResult(data, 'investigate');
+  check('renders identity and source', card.body.includes('Identity') &&
+        card.body.includes('analyst@example.com'), card.body.slice(0, 400));
+  check('identity is the compact grid, not a tall table',
+        card.body.includes('person-identity-grid') &&
+        !card.body.includes('person-meta'), card.body.slice(0, 600));
+  check('accounts show every engine', card.body.includes('github.com') &&
+        card.body.includes('holehe') && card.body.includes('user-scanner'),
+        card.body.slice(0, 600));
+  check('accounts fold URL and evidence into one column',
+        card.body.includes('<th>Account</th>') &&
+        card.body.includes('<th>Found by</th>') &&
+        !card.body.includes('<th>Evidence</th>') &&
+        !card.body.includes('<th>URL</th>'), card.body.slice(0, 700));
+  check('links are rows, not nested cards',
+        card.body.includes('person-link-body') &&
+        !card.body.includes('person-link-high'), card.body.slice(0, 900));
+  check('possible lead is labelled', card.body.includes('possible') &&
+        card.body.includes('not proof of one person'), card.body.slice(0, 800));
+  check('conflict is surfaced', card.body.includes('Conflicts (1)') &&
+        card.body.includes('differs from WHOIS'), card.body.slice(0, 800));
+  check('domain context stays separate and captioned',
+        card.body.includes('Domain context') &&
+        card.body.includes('not necessarily the person') &&
+        card.body.includes('legal@example.com'), card.body.slice(0, 900));
+  check('raw module payloads stay off the face',
+        !card.body.includes('user-scanner_only') && !card.body.includes('Only holehe'),
+        card.body.slice(0, 900));
+  check('raw modules live in Details', card.details.includes('email') &&
+        card.details.includes('github.com'), card.details.slice(0, 400));
+  check('details entity index is a compact grid, not a second graph',
+        card.details.includes('person-identity-grid') &&
+        !card.details.includes('entity-graph'), card.details.slice(0, 500));
+  check('identity notes live in Details',
+        card.details.includes('WHOIS values describe the domain'), card.details.slice(0, 400));
+
+  const injected = sandbox.renderResult({
+    person: Object.assign({}, person, {
+      names: [{ value: '<img src=x onerror=alert(1)>', source: 'x' }],
+    }),
+  }, 'investigate');
+  check('person fields are escaped', !injected.body.includes('<img'),
+        injected.body.slice(0, 300));
+
+  const legacy = sandbox.renderResult(
+    { entities: { emails: ['a@b.com'] }, correlations: [] }, 'investigate');
+  check('legacy run keeps the entities-first layout',
+        legacy.body.includes('Entities') && legacy.details === '',
+        legacy.body.slice(0, 300));
+})();
+
 console.log('== social preflight tells the truth ==');
 (function () {
   const realGet = sandbox.document.getElementById;
@@ -399,13 +504,17 @@ console.log('== social preflight tells the truth ==');
 console.log('== social session honesty ==');
 (function () {
   sandbox.SOCIAL_META = { mastodon: { browser: false }, instagram: { browser: true } };
-  const keyless = sandbox.renderSocial({ platform: 'mastodon', handle: 'u' });
+  const keyless = sandbox.renderSocialDetails({ platform: 'mastodon', handle: 'u' });
   check('keyless shows no-session line, not red logged-out',
     keyless.includes('none needed (keyless)') && !keyless.includes('logged out'), keyless.slice(0, 300));
-  const insta = sandbox.renderSocial({ platform: 'instagram', handle: 'u' });
+  const insta = sandbox.renderSocialDetails({ platform: 'instagram', handle: 'u' });
   check('instagram keeps logged-out', insta.includes('logged out'), insta.slice(0, 200));
-  const burner = sandbox.renderSocial({ platform: 'instagram', handle: 'u', logged_in: true });
+  const burner = sandbox.renderSocialDetails({ platform: 'instagram', handle: 'u', logged_in: true });
   check('burner login shown', burner.includes('burner logged in'), burner.slice(0, 200));
+  const body = sandbox.renderSocial({ platform: 'instagram', handle: 'u', source: 'browser' });
+  check('session chatter stays out of the profile body',
+    !body.includes('logged out') && !body.includes('Session') && !body.includes('Source'),
+    body.slice(0, 300));
 })();
 
 console.log('== social plurals and dates ==');
@@ -419,6 +528,88 @@ console.log('== social plurals and dates ==');
     posts.includes('1 like') && posts.includes('2 comments') && posts.includes('2024-05-01'), posts.slice(0, 400));
   const joined = sandbox.renderSocial({ platform: 'mastodon', handle: 'u', joined: '2016-03-16T00:00:00.000Z' });
   check('joined sliced to date', joined.includes('2016-03-16') && !joined.includes('00:00:00'), joined.slice(0, 300));
+})();
+
+console.log('== website: light renderer ==');
+(function () {
+  const w = sandbox.renderWebsite({
+    whois: { Registrar: 'Example Registrar' },
+    dns_records: { A: '1.2.3.4' },
+    ct: ['www.example.com'],
+    // Dormant infra keys must not render even if a legacy payload has them.
+    subdomains: ['should-not-render.example.com'],
+    shodan: { ports: [80] },
+    title: 'nope',
+    status_code: 200,
+  });
+  check('renders owner / DNS / CT',
+    w.includes('WHOIS') && w.includes('DNS records') && w.includes('Certificate transparency'),
+    w.slice(0, 300));
+  check('does not render dormant infra',
+    !w.includes('Shodan') && !w.includes('Subdomains') && !w.includes('Page title'),
+    w.slice(0, 300));
+  const entry = sandbox.RENDERERS.find(function (r) { return r.name === 'website'; });
+  check('website matcher fires on light keys',
+    !!entry && entry.matches({ whois: {} }) && entry.matches({ dns_records: {} })
+    && entry.matches({ ct: ['x'] }));
+  check('website no longer matches on subdomains',
+    !!entry && !entry.matches({ subdomains: ['x'] }));
+})();
+
+console.log('== results first, machinery in the drawers ==');
+(function () {
+  const e = sandbox.renderEmail({
+    both: [{ domain: 'instagram.com', url: 'https://instagram.com',
+             engines: ['holehe', 'user-scanner'] },
+           { domain: 'spotify.com' }],
+    holehe_only: [{ domain: 'pinterest.com', engines: ['holehe'] }],
+    user_scanner_only: [{ domain: 'github.com', url: 'https://github.com' }],
+    blackbird_only: [],
+    breach: { found: 2 },
+  });
+  check('email: one accounts table with a Found by column',
+    e.includes('<th>Found by</th>') && e.includes('instagram.com')
+    && e.includes('holehe + user-scanner'), e.slice(0, 700));
+  check('email: bucket label is the fallback when engines are absent',
+    e.includes('2+ engines') && e.includes('user-scanner'), e.slice(0, 700));
+  check('email: per-engine bucket headings are gone',
+    !e.includes('user-scanner only') && !e.includes('Found by multiple engines'),
+    e.slice(0, 700));
+
+  const u = sandbox.renderUsername({
+    all_4: [{ domain: 'a.com', url: 'https://a.com' }],
+    us_only: [{ domain: 'b.com' }],
+  });
+  check('username: names every engine that agreed',
+    u.includes('user-scanner + sherlock + maigret + blackbird') && u.includes('Found by'),
+    u.slice(0, 700));
+
+  const w = sandbox.renderWebsite({
+    whois: { Registrar: 'R' }, dns_records: { A: '1.2.3.4' },
+    ct: ['www.example.com'],
+  });
+  check('website: each result block names its tool',
+    w.includes('result-tool') && w.includes('whois') && w.includes('dig') && w.includes('crt.sh'),
+    w.slice(0, 900));
+
+  const sec = sandbox.renderSection('DNS records', 'x', 'dig');
+  check('renderSection carries a tool pill', sec.includes('result-tool') && sec.includes('dig'), sec);
+
+  const tab = sandbox.resultTab('Run log', 'x', 3);
+  check('drawer starts collapsed and counts its lines',
+    tab.indexOf('<details class="result-tab">') === 0 && tab.includes('Run log (3)')
+    && !tab.includes(' open'), tab);
+
+  const head = sandbox.resultHead({}, 'email', 'a@b.com');
+  check('card head names the kind and target',
+    head.includes('>Email<') && head.includes('a@b.com'), head);
+
+  const split = sandbox.renderResult(
+    { platform: 'mastodon', handle: 'u', source: 'http', metrics: { posts: 2 } }, 'social');
+  check('social diagnostics split out of the body',
+    split.body.includes('No profile fields retrieved') && !split.body.includes('Source')
+    && split.details.includes('Source') && split.details.includes('Collected'),
+    split.body.slice(0, 300) + ' || ' + split.details.slice(0, 300));
 })();
 
 console.log('== run timestamps read uniformly ==');

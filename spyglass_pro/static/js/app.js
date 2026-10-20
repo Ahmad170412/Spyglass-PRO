@@ -194,31 +194,11 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
 
-      if (api === 'lens') {
-        params.set('target', target);
-        Object.keys(flags).forEach(function (k) { params.set(k, flags[k]); });
-        runAsyncScan({
-          url: '/api/lens/run?' + params.toString(), method: 'GET',
-          resultsId: resultsId, target: target, qtype: 'lens', btn: btn,
-          onDone: function () { if (flags.alsoSpyglass) runSpyglassIp(target, resultsId); }
-        });
-        return;
-      }
-
       setLoading(btn, false);
       clearScan(resultsId);
       showToast('Unknown API: ' + api, 'error');
     });
   });
-
-  function runSpyglassIp(target, resultsId) {
-    showScanning(resultsId, target, true, 'ip');
-    runAsyncScan({
-      url: '/api/spyglass/run?module=ip&target=' + encodeURIComponent(target),
-      method: 'GET', resultsId: resultsId, target: target,
-      qtype: 'ip', append: true, btn: null
-    });
-  }
 
   /* ── Load status on startup ── */
   apiFetch('/api/status').then(function (r) { return r.json(); }).then(function (data) {
@@ -311,6 +291,46 @@ function showToast(msg, type) {
   setTimeout(function () { toast.remove(); }, 4000);
 }
 
+/* Themed replacement for window.confirm. Resolves true only when the
+   operator submits the confirm button; Esc, backdrop clicks and Cancel
+   all resolve false. */
+function confirmAction(options) {
+  var dialog = document.getElementById('confirmDialog');
+  if (!dialog || typeof dialog.showModal !== 'function') return Promise.resolve(false);
+  if (dialog.open) dialog.close('cancel');
+  var opts = options || {};
+  document.getElementById('confirmKicker').textContent = opts.kicker || 'Confirm action';
+  document.getElementById('confirmTitle').textContent = opts.title || 'Are you sure?';
+  document.getElementById('confirmBody').textContent = opts.body || '';
+  document.getElementById('confirmCancel').textContent = opts.cancelLabel || 'Cancel';
+  var ok = document.getElementById('confirmOk');
+  ok.textContent = opts.confirmLabel || 'Confirm';
+  ok.className = 'btn btn-sm ' + (opts.danger === false ? 'btn-primary' : 'btn-danger');
+  dialog.returnValue = '';
+  if (!dialog.dataset.backdropBound) {
+    dialog.dataset.backdropBound = '1';
+    dialog.addEventListener('click', function (event) {
+      if (event.target === dialog) dialog.close('cancel');
+    });
+  }
+  return new Promise(function (resolve) {
+    function done() {
+      dialog.removeEventListener('close', done);
+      resolve(dialog.returnValue === 'confirm');
+    }
+    dialog.addEventListener('close', done);
+    try {
+      dialog.showModal();
+    } catch (err) {
+      dialog.removeEventListener('close', done);
+      resolve(false);
+      return;
+    }
+    var cancel = document.getElementById('confirmCancel');
+    if (cancel) cancel.focus();
+  });
+}
+
 /* Optional recon tools (sherlock, maigret, holehe, ignorant, ...) are
    discovered on PATH. A missing one does not fail a scan — the engine
    skips that leg — so without this the UI would present a partial result
@@ -332,7 +352,7 @@ function renderMissingNotice() {
   var degraded = STATUS.degraded || {};
   var lines = [];
   var labels = { email: 'Email', username: 'Username', phone: 'Phone',
-                 website: 'Website', ip: 'IP address', metadata: 'Metadata' };
+                 website: 'Website', metadata: 'Metadata' };
   Object.keys(degraded).forEach(function (qtype) {
     lines.push((labels[qtype] || qtype) + ': no ' + degraded[qtype].join(', '));
   });
@@ -452,18 +472,12 @@ var PREFLIGHT_TOOLS = {
   email: ['holehe', 'user-scanner', 'blackbird'],
   username: ['user-scanner', 'sherlock', 'maigret', 'blackbird'],
   phone: ['ignorant', 'phoneinfoga'],
-  website: ['dig', 'whois', 'curl'],
-  ip: ['shodan'],
+  website: ['dig', 'whois'],
   metadata: ['exiftool'],
   opsec: [],
   social: []
 };
 var PREFLIGHT_KEYS = {
-  lens: [['shodan_api_key', 'Shodan'], ['virustotal_api_key', 'VirusTotal'],
-         ['abuseipdb_api_key', 'AbuseIPDB'], ['censys_api_key', 'Censys'],
-         ['greynoise_api_key', 'GreyNoise'], ['nvd_api_key', 'NVD']],
-  ip: [['shodan_api_key', 'Shodan'], ['virustotal_api_key', 'VirusTotal'],
-       ['abuseipdb_api_key', 'AbuseIPDB']],
   darkweb: [['intelx_api_key', 'IntelX'], ['hibp_api_key', 'HIBP']],
   email: [['hibp_api_key', 'HIBP']],
   username: [['hibp_api_key', 'HIBP']],
@@ -474,12 +488,6 @@ var PREFLIGHT_KEYS = {
  * Phrases mirror the Settings help text; adding a key here without the
  * engine honoring it would be a lie, so keep the two in step. */
 var PREFLIGHT_WHY = {
-  shodan_api_key: 'open ports + org/ISP',
-  virustotal_api_key: 'IP reputation votes',
-  abuseipdb_api_key: 'abuse confidence score',
-  censys_api_key: 'host certs + services',
-  greynoise_api_key: 'noise classification',
-  nvd_api_key: 'CVE enrichment',
   intelx_api_key: 'paste + breach archive',
   hibp_api_key: 'authoritative breach list'
 };
@@ -594,7 +602,7 @@ function runAsyncScan(opts) {
     } else {
       // Synchronous answer (queue rejection, validation error, …).
       setLoading(btn, false);
-      displayResults(resultsId, data, append, qtype);
+      displayResults(resultsId, data, append, qtype, opts.target);
       if (opts.onDone) opts.onDone(data);
     }
   }).catch(function (err) {
@@ -610,7 +618,7 @@ function finishAsyncScan(opts, result) {
   var scan = activeScans[opts.resultsId];
   if (scan && scan.cancelled) return;
   setLoading(opts.btn || null, false);
-  displayResults(opts.resultsId, result, !!opts.append, opts.qtype || '');
+  displayResults(opts.resultsId, result, !!opts.append, opts.qtype || '', opts.target);
   if (opts.onDone) opts.onDone(result);
 }
 
@@ -696,7 +704,77 @@ function pollJob(jobId, opts, seen) {
   });
 }
 
-function displayResults(containerId, data, append, qtype) {
+/* ── Result card chrome ──
+ *
+ * A finished card answers two questions and nothing else: what was found,
+ * and which tool found it. Everything else a run carries — the progress
+ * log, derived findings, module diagnostics, artifacts, the raw payload —
+ * sleeps behind a disclosure until asked for. A result that needs its log
+ * read to be understood is not a result. */
+var RESULT_KIND = {
+  email: 'Email', username: 'Username', phone: 'Phone', website: 'Website',
+  darkweb: 'Dark web', investigate: 'Investigation', investigation: 'Investigation',
+  opsec: 'OPSEC', metadata: 'Metadata', social: 'Social'
+};
+
+function resultKind(data, qtype) {
+  if (data && data.platform) return String(data.platform);
+  return RESULT_KIND[qtype] || (qtype ? String(qtype) : 'Result');
+}
+
+function socialHandle(value) {
+  var v = String(value || '');
+  return v.charAt(0) === '@' ? v : '@' + v;
+}
+
+function resultTarget(data, qtype, fallback) {
+  if (fallback) return qtype === 'social' ? socialHandle(fallback) : fallback;
+  if (data && data.target) return String(data.target);
+  if (data && data.handle) return socialHandle(data.handle);
+  if (data && data.query) return String(data.query);
+  if (data && data.inputs && typeof data.inputs === 'object') {
+    return Object.keys(data.inputs).map(function (k) { return data.inputs[k]; })
+      .filter(function (v) { return v; }).join(' · ');
+  }
+  return '';
+}
+
+function resultHead(data, qtype, target) {
+  var html = '<div class="result-head"><span class="result-kind">' +
+             escapeHtml(resultKind(data, qtype)) + '</span>';
+  var t = resultTarget(data, qtype, target);
+  if (t) html += '<span class="result-target">' + escapeHtml(t) + '</span>';
+  return html + '</div>';
+}
+
+/* One collapsed drawer. The summary is the only visible part — it reads as
+   a small tab, and opening it claims the full card width. */
+function resultTab(label, inner, count) {
+  if (!inner) return '';
+  var n = (count === undefined || count === null) ? '' : ' (' + count + ')';
+  return '<details class="result-tab"><summary>' + escapeHtml(label) + n +
+         '</summary><div class="result-tab-body">' + inner + '</div></details>';
+}
+
+function runLogHtml(lines) {
+  var html = '<div class="run-log">';
+  lines.forEach(function (line) {
+    html += '<div class="run-log-line">' + escapeHtml(line) + '</div>';
+  });
+  return html + '</div>';
+}
+
+function artifactsHtml(items) {
+  var html = '<div class="artifact-list">';
+  items.forEach(function (a) {
+    html += '<div class="artifact-item"><span class="artifact-kind">' +
+            escapeHtml(a.kind) + '</span><code>' + escapeHtml(a.path) +
+            '</code></div>';
+  });
+  return html + '</div>';
+}
+
+function displayResults(containerId, data, append, qtype, target) {
   clearScan(containerId);
   var container = document.getElementById(containerId);
   if (!container) return;
@@ -705,39 +783,46 @@ function displayResults(containerId, data, append, qtype) {
   if (!data || (typeof data === 'object' && Object.keys(data).length === 0)) {
     html = '<div class="result-card"><p class="dim">No results returned.</p></div>';
   } else if (data.error) {
-    html = '<div class="result-card"><p class="status-err">Error: ' + escapeHtml(data.error) + '</p></div>';
+    html = '<div class="result-card">' + resultHead(data, qtype, target) +
+           '<p class="status-err">Error: ' + escapeHtml(data.error) + '</p></div>';
   } else {
+    var result = renderResult(data, qtype || '');
     html = '<div class="result-card">';
+    html += resultHead(data, qtype, target);
     if (data.summary) {
-      html += '<h4>' + escapeHtml(data.summary) + '</h4>';
+      html += '<p class="result-summary">' + escapeHtml(data.summary) + '</p>';
     }
-    if (Array.isArray(data.progress) && data.progress.length) {
-      html += '<div class="run-log"><span class="run-log-title">Run log</span>';
-      data.progress.forEach(function (line) {
-        html += '<div class="run-log-line">' + escapeHtml(line) + '</div>';
-      });
-      html += '</div>';
-    }
+    html += '<div class="result-body">' + result.body + '</div>';
+
+    /* Everything the card deliberately does not show on its face. */
+    var details = '';
+    if (data.normalized) details += renderNormalized(data.normalized);
+    if (result.details) details += result.details;
     if (Array.isArray(data.artifacts) && data.artifacts.length) {
-      html += '<div class="artifact-list"><span class="run-log-title">Artifacts</span>';
-      data.artifacts.forEach(function (a) {
-        html += '<div class="artifact-item"><span class="artifact-kind">' + escapeHtml(a.kind) +
-                '</span><code>' + escapeHtml(a.path) + '</code></div>';
-      });
-      html += '</div>';
+      details += '<span class="result-subtitle">Artifacts</span>' +
+                 artifactsHtml(data.artifacts);
     }
     if (data.stored_run_id) {
-      html += '<div class="artifact-list"><span class="run-log-title">Stored</span>' +
-              '<div class="artifact-item"><span class="artifact-kind">case</span>' +
-              '<code>run #' + escapeHtml(String(data.stored_run_id)) +
-              ' — visible under Stored Cases</code></div></div>';
+      details += '<div class="artifact-list"><span class="result-subtitle">Stored</span>' +
+                 '<div class="artifact-item"><span class="artifact-kind">case</span>' +
+                 '<code>run #' + escapeHtml(String(data.stored_run_id)) +
+                 ' — visible under Stored Cases</code></div></div>';
     }
-    if (data.normalized) {
-      html += renderNormalized(data.normalized);
+    if (data.artifact_error) {
+      details += '<p class="status-err">Export error: ' + escapeHtml(data.artifact_error) + '</p>';
     }
-    html += renderBody(data, qtype || '');
+    if (data.facts_error) {
+      details += '<p class="status-err">Findings error: ' + escapeHtml(data.facts_error) + '</p>';
+    }
+
+    var tabs = '';
+    if (details) tabs += resultTab('Details', details);
+    if (Array.isArray(data.progress) && data.progress.length) {
+      tabs += resultTab('Run log', runLogHtml(data.progress), data.progress.length);
+    }
     var raw = typeof data === 'object' ? JSON.stringify(data, null, 2) : String(data);
-    html += '<details class="raw-json"><summary>Raw JSON</summary><pre>' + escapeHtml(raw) + '</pre></details>';
+    tabs += resultTab('Raw JSON', '<pre>' + escapeHtml(raw) + '</pre>');
+    html += '<div class="result-tabs">' + tabs + '</div>';
     html += '<div class="export-btns">';
     html += '<button class="btn btn-sm btn-outline" onclick="copyResult(\'' + containerId + '\')">Copy JSON</button>';
     html += '</div></div>';
@@ -765,36 +850,56 @@ function displayResults(containerId, data, append, qtype) {
    both match, so keep the specific ones above the generic ones. */
 var RENDERERS = [
   { name: 'social',     matches: function (d) { return d.platform !== undefined && d.handle !== undefined; },
-    render: renderSocial },
-  { name: 'investigate', matches: function (d, q) { return q === 'investigate' || d.entities !== undefined; },
-    render: renderInvestigate },
+    render: renderSocial, details: renderSocialDetails },
+  { name: 'investigate', matches: function (d, q) {
+      return q === 'investigate' || q === 'investigation' ||
+             d.entities !== undefined || d.person !== undefined;
+    },
+    render: renderInvestigate, details: renderInvestigateDetails },
   { name: 'lens',       matches: function (d) { return d.resolved_ip !== undefined || d.input_type !== undefined; },
     render: renderLens },
   { name: 'opsec',      matches: function (d) { return d.direct !== undefined && d.recommendations !== undefined; },
     render: renderOpsec },
   { name: 'phone',      matches: function (d) { return d.phonenumbers !== undefined; },
     render: renderPhone },
-  { name: 'website',    matches: function (d) { return d.subdomains !== undefined; },
+  { name: 'website',    matches: function (d) {
+      return d.whois !== undefined || d.dns_records !== undefined || d.ct !== undefined; },
     render: renderWebsite },
   { name: 'darkweb',    matches: function (d) { return d.ahmia !== undefined; },
     render: renderDarkweb },
-  { name: 'username',   matches: function (d) { return d.all_4 !== undefined; },
+  { name: 'username',   matches: function (d) {
+      return d.all_4 !== undefined || d.all_3_no_bb !== undefined ||
+             d.all_3_no_mg !== undefined || d.all_3_no_sh !== undefined ||
+             d.all_3_no_us !== undefined || d.us_only !== undefined ||
+             d.sherlock_only !== undefined || d.maigret_only !== undefined;
+    },
     render: renderUsername },
-  { name: 'email',      matches: function (d) { return d.user_scanner_only !== undefined; },
-    render: renderEmail },
-  /* Matched on geo/hostname/a_records: open_ports went with the nmap scan,
-     so keying on it meant this renderer never fired. */
-  { name: 'ip',         matches: function (d) {
-      return d.geo !== undefined || d.hostname !== undefined || d.a_records !== undefined; },
-    render: renderSpyglassIp }
+  { name: 'email',      matches: function (d) {
+      return d.both !== undefined || d.holehe_only !== undefined ||
+             d.user_scanner_only !== undefined;
+    },
+    render: renderEmail }
 ];
 
-function renderBody(data, qtype) {
+/* Renderers may expose a `details` builder for content that belongs in the
+   collapsed Details drawer rather than the result body. `renderResult`
+   returns both halves; `renderBody` stays string-only for nested calls
+   (investigation sub-results, legacy callers). */
+function renderResult(data, qtype) {
   for (var i = 0; i < RENDERERS.length; i++) {
     var entry = RENDERERS[i];
-    if (entry.matches(data, qtype)) return entry.render(data, qtype);
+    if (entry.matches(data, qtype)) {
+      return {
+        body: entry.render(data, qtype) || '',
+        details: entry.details ? (entry.details(data, qtype) || '') : ''
+      };
+    }
   }
-  return renderGeneric(data);
+  return { body: renderGeneric(data), details: '' };
+}
+
+function renderBody(data, qtype) {
+  return renderResult(data, qtype).body;
 }
 
 /* ── Social (registry-driven, one layout for every platform) ── *//* Mirror of PROFILE_FIELDS in spyglass_pro/social/schema.py — the field
@@ -849,30 +954,10 @@ function socialCell(field, value) {
 
 function renderSocial(d) {
   var html = '';
-  var label = (d.platform || 'social').toUpperCase();
-
-  html += '<h3>' + escapeHtml(label) + ' — @' + escapeHtml(d.handle || '') + '</h3>';
 
   if (d.error) {
     html += '<p class="res-line">Error: <span class="status-err">' +
             escapeHtml(d.error) + '</span></p>';
-  }
-  /* Logged-out in red reads as failure — but for keyless platforms no
-     session can or should exist, so say so plainly instead. */
-  var keyless = (typeof SOCIAL_META !== 'undefined') && SOCIAL_META &&
-    SOCIAL_META[d.platform] && !SOCIAL_META[d.platform].browser;
-  if (d.logged_in) {
-    html += renderStatusLine('Session', 'burner logged in', true);
-  } else if (keyless) {
-    html += '<p class="res-line dim">Session: none needed (keyless)</p>';
-  } else {
-    html += renderStatusLine('Session', 'logged out', false);
-  }
-  html += renderStatusLine('Source', d.source || 'n/a', !!d.source);
-
-  if (d.avatar_url && safeHref(d.avatar_url)) {
-    html += '<p class="res-line"><img class="social-avatar" src="' +
-            escapeHtml(safeHref(d.avatar_url)) + '" alt="" /></p>';
   }
 
   /* Fields the platform can never return are omitted, not shown as empty,
@@ -910,27 +995,45 @@ function renderSocial(d) {
     });
     html += '</ul>';
   }
+  return html;
+}
+
+/* Session state, what the platform refused to return, and collection
+   counters: operator diagnostics, not findings. They live in Details. */
+function renderSocialDetails(d) {
+  if (!d || d.error) return '';
+  var html = '';
+  /* Logged-out in red reads as failure — but for keyless platforms no
+     session can or should exist, so say so plainly instead. */
+  var keyless = (typeof SOCIAL_META !== 'undefined') && SOCIAL_META &&
+    SOCIAL_META[d.platform] && !SOCIAL_META[d.platform].browser;
+  if (d.logged_in) {
+    html += renderStatusLine('Session', 'burner logged in', true);
+  } else if (keyless) {
+    html += '<p class="res-line dim">Session: none needed (keyless)</p>';
+  } else {
+    html += renderStatusLine('Session', 'logged out', false);
+  }
+  html += renderStatusLine('Source', d.source || 'n/a', !!d.source);
 
   /* Walls are the honest counterpart of an empty list. */
   var walls = d.walls || {};
-  var wallKeys = Object.keys(walls);
-  if (wallKeys.length) {
-    html += '<h4>Not retrieved</h4>';
-    wallKeys.forEach(function (kind) {
-      html += renderStatusLine(walls[kind].label || kind, walls[kind].why || 'unavailable', false);
-    });
-  }
+  Object.keys(walls).forEach(function (kind) {
+    html += renderStatusLine(walls[kind].label || kind, walls[kind].why || 'unavailable', false);
+  });
 
   if (d.metrics && Object.keys(d.metrics).length) {
-    html += '<h4>Collected</h4>';
+    html += '<span class="result-subtitle">Collected</span>';
     Object.keys(d.metrics).sort().forEach(function (name) {
       html += renderStatusLine(name.replace(/_/g, ' '), d.metrics[name], true);
     });
   }
 
   if (d.notes && d.notes.length) {
-    html += '<h4>Notes</h4>';
-    d.notes.forEach(function (note) { html += '<p class="res-line">' + escapeHtml(note) + '</p>'; });
+    html += '<span class="result-subtitle">Notes</span>';
+    d.notes.forEach(function (note) {
+      html += '<p class="res-line">' + escapeHtml(note) + '</p>';
+    });
   }
   return html;
 }
@@ -1034,7 +1137,14 @@ function updateSocialCaps(platforms) {
   if (!caps || !sel || !sel.value) return;
   if (!platforms) {
     return apiFetch('/api/social/platforms').then(function (r) { return r.json(); })
-      .then(function (list) { showCaps(list, sel.value); });
+      .then(function (list) { showCaps(list, sel.value); })
+      .catch(function () {
+        /* A tab click that cannot reach the registry must explain itself
+           rather than reject into the console — and must not blank the
+           operator's selection. */
+        var el = document.getElementById('socialCaps');
+        if (el) el.textContent = 'Could not reach the platform registry — capabilities unknown; your selection stays.';
+      });
   }
   showCaps(platforms, sel.value);
 }
@@ -1069,10 +1179,18 @@ function showCaps(platforms, key) {
     (match.login === 'none' ? (match.browser === false ? ' · keyless, no browser needed' : ' · no burner login') : ' · burner login supported');
 }
 
-function renderSection(title, inner) {
+function renderSection(title, inner, tool, badge) {
   if (!inner) return '';
-  return '<div class="res-section"><span class="res-section-title">' +
-         escapeHtml(title) + '</span>' + inner + '</div>';
+  var badgeHtml = '';
+  if (badge && badge.text) {
+    badgeHtml = '<span class="person-conf person-conf-' +
+      personConfidence(badge.confidence) + '">' + escapeHtml(badge.text) + '</span>';
+  }
+  return '<div class="res-section"><div class="res-section-head">' +
+         '<span class="res-section-title">' + escapeHtml(title) + '</span>' +
+         '<span class="res-section-meta">' + badgeHtml +
+         (tool ? '<span class="result-tool">' + escapeHtml(tool) + '</span>' : '') +
+         '</span></div>' + inner + '</div>';
 }
 
 function renderKv(obj, labels) {
@@ -1210,52 +1328,98 @@ function renderStatusLine(label, value, good) {
          (good ? 'ok' : 'err') + '">' + escapeHtml(String(value)) + '</span></p>';
 }
 
+/* ── Accounts: one table, one row per account, the tool in its own column ──
+ *
+ * The old renderer split accounts into "user-scanner only", "3 of 4 (no
+ * blackbird)" … — a map of which engine ran, not of what was found. What
+ * the operator needs is the account and the engine(s) behind it; that is a
+ * column, not a section hierarchy. Single-source rows stay visibly
+ * single-source so a lone hit never reads like a four-engine agreement. */
+function renderAccountTable(rows) {
+  var shown = rows.slice(0, 100);
+  var html = '<table class="res-table results-table"><thead><tr>' +
+             '<th>Account</th><th>URL</th><th>Found by</th>' +
+             '</tr></thead><tbody>';
+  shown.forEach(function (r) {
+    var url = r.url || '';
+    var href = url ? safeHref(url) : '';
+    var link = href
+      ? '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener">' +
+        escapeHtml(url) + '</a>'
+      : (url ? '<span class="dim">' + escapeHtml(url) + '</span>'
+             : '<span class="dim">—</span>');
+    html += '<tr><td>' + escapeHtml(r.domain || '') + '</td><td>' + link +
+            '</td><td><span class="result-tool">' + escapeHtml(r.tool || '—') +
+            '</span></td></tr>';
+  });
+  if (rows.length > shown.length) {
+    html += '<tr><td colspan="3" class="dim">+ ' + (rows.length - shown.length) +
+            ' more in Raw JSON</td></tr>';
+  }
+  return html + '</tbody></table>';
+}
+
+function accountRows(buckets, data) {
+  var rows = [];
+  buckets.forEach(function (bucket) {
+    (data[bucket[0]] || []).forEach(function (a) {
+      rows.push({ domain: a.domain || a.name || a.url || '',
+                  url: a.url || '',
+                  tool: (a.engines && a.engines.length)
+                    ? a.engines.join(' + ') : bucket[1] });
+    });
+  });
+  return rows;
+}
+
+var EMAIL_BUCKETS = [
+  ['both', '2+ engines'],
+  ['user_scanner_only', 'user-scanner'],
+  ['holehe_only', 'holehe'],
+  ['blackbird_only', 'blackbird']
+];
+
 /* ── Spyglass-OSINT: email ── */
 function renderEmail(d) {
+  var rows = accountRows(EMAIL_BUCKETS, d);
   var html = '';
-  var groups = [
-    ['both', 'Found by multiple engines'],
-    ['user_scanner_only', 'user-scanner only'],
-    ['holehe_only', 'holehe only'],
-    ['blackbird_only', 'blackbird only']
-  ];
-  groups.forEach(function (g) {
-    if (d[g[0]] && d[g[0]].length) {
-      html += renderSection(g[1] + ' (' + d[g[0]].length + ')', renderLinkTable(d[g[0]]));
-    }
-  });
-  if (d.breach) html += renderSection('Breach check', renderBreach(d.breach));
+  if (rows.length) {
+    html += renderSection('Accounts (' + rows.length + ')',
+                          renderAccountTable(rows), 'email engines');
+  }
+  if (d.breach) html += renderSection('Breach check', renderBreach(d.breach), 'breach');
   return html || renderGeneric(d);
 }
 
+/* Bucket key → the exact engines that had to agree for a row to land there.
+   Naming all four on an all_4 row is evidence, not decoration. */
+var USERNAME_BUCKETS = [
+  ['all_4', 'user-scanner + sherlock + maigret + blackbird'],
+  ['all_3_no_bb', 'user-scanner + sherlock + maigret'],
+  ['all_3_no_mg', 'user-scanner + sherlock + blackbird'],
+  ['all_3_no_sh', 'user-scanner + maigret + blackbird'],
+  ['all_3_no_us', 'sherlock + maigret + blackbird'],
+  ['us+sherlock', 'user-scanner + sherlock'],
+  ['us+maigret', 'user-scanner + maigret'],
+  ['us+blackbird', 'user-scanner + blackbird'],
+  ['sherlock+maigret', 'sherlock + maigret'],
+  ['sherlock+blackbird', 'sherlock + blackbird'],
+  ['maigret+blackbird', 'maigret + blackbird'],
+  ['us_only', 'user-scanner'],
+  ['sherlock_only', 'sherlock'],
+  ['maigret_only', 'maigret'],
+  ['blackbird_only', 'blackbird']
+];
+
 /* ── Spyglass-OSINT: username ── */
 function renderUsername(d) {
-  var order = [
-    ['all_4', 'All 4 engines agree'],
-    ['all_3_no_bb', '3 of 4 (no blackbird)'],
-    ['all_3_no_mg', '3 of 4 (no maigret)'],
-    ['all_3_no_sh', '3 of 4 (no sherlock)'],
-    ['all_3_no_us', '3 of 4 (no user-scanner)'],
-    ['us+sherlock', 'user-scanner + sherlock'],
-    ['us+maigret', 'user-scanner + maigret'],
-    ['us+blackbird', 'user-scanner + blackbird'],
-    ['sherlock+maigret', 'sherlock + maigret'],
-    ['sherlock+blackbird', 'sherlock + blackbird'],
-    ['maigret+blackbird', 'maigret + blackbird'],
-    ['us_only', 'user-scanner only'],
-    ['sherlock_only', 'sherlock only'],
-    ['maigret_only', 'maigret only'],
-    ['blackbird_only', 'blackbird only']
-  ];
+  var rows = accountRows(USERNAME_BUCKETS, d);
   var html = '';
-  var shown = 0;
-  order.forEach(function (g) {
-    if (d[g[0]] && d[g[0]].length) {
-      html += renderSection(g[1] + ' (' + d[g[0]].length + ')', renderLinkTable(d[g[0]]));
-      shown += d[g[0]].length;
-    }
-  });
-  if (d.breach) html += renderSection('Breach check', renderBreach(d.breach));
+  if (rows.length) {
+    html += renderSection('Accounts (' + rows.length + ')',
+                          renderAccountTable(rows), 'username engines');
+  }
+  if (d.breach) html += renderSection('Breach check', renderBreach(d.breach), 'breach');
   return html || renderGeneric(d);
 }
 
@@ -1268,55 +1432,34 @@ function renderPhone(d) {
       location: 'Location', carrier: 'Carrier', timezone: 'Timezone',
       type: 'Line type', e164: 'E.164', international: 'International',
       national: 'National'
-    }));
+    }), 'phonenumbers');
   }
   if (d.phoneinfoga && Object.keys(d.phoneinfoga).length) {
-    html += renderSection('PhoneInfoga', renderKv(d.phoneinfoga));
+    html += renderSection('PhoneInfoga', renderKv(d.phoneinfoga), 'PhoneInfoga');
   }
   if (Array.isArray(d.ignorant) && d.ignorant.length) {
     html += renderSection('Web mentions', renderLinkTable(
-      d.ignorant.map(function (u) { return { domain: u, url: u }; }), 20));
+      d.ignorant.map(function (u) { return { domain: u, url: u }; }), 20), 'ignorant');
   }
-  if (d.breach) html += renderSection('Breach check', renderBreach(d.breach));
+  if (d.breach) html += renderSection('Breach check', renderBreach(d.breach), 'breach');
   return html || renderGeneric(d);
 }
 
-/* ── Spyglass-OSINT: website ── */
+/* ── Spyglass-OSINT: website (light: owner / DNS / CT) ── */
 function renderWebsite(d) {
   var html = '';
-  if (d.title) html += renderStatusLine('Page title', d.title, true);
-  if (d.status_code) html += renderStatusLine('HTTP status', d.status_code, true);
-  if (Array.isArray(d.subdomains) && d.subdomains.length) {
-    html += renderSection('Subdomains (' + d.subdomains.length + ')', renderChips(d.subdomains));
+  if (d.whois) html += renderSection('WHOIS', renderKv(d.whois), 'whois');
+  if (d.dns_records) html += renderSection('DNS records', renderKv(d.dns_records), 'dig');
+  if (d.dns_email_security) {
+    html += renderSection('DNS email security', renderKv(d.dns_email_security), 'dig');
   }
-  if (d.dns) html += renderSection('DNS', renderKv(d.dns));
-  if (d.whois) html += renderSection('WHOIS', renderKv(d.whois));
-  if (d.shodan) html += renderSection('Shodan', renderKv(d.shodan));
-  html += renderGeneric(d, ['title', 'status_code', 'subdomains', 'dns', 'whois',
-                            'shodan', 'dns_records', 'wildcard_dns',
-                            'dns_email_security', 'history']);
-  return html;
-}
-
-/* ── Spyglass-OSINT: ip ── */
-function renderSpyglassIp(d) {
-  var html = '';
-  if (d.geo) html += renderSection('GeoIP', renderKv(d.geo));
-  if (d.whois) html += renderSection('WHOIS', renderKv(d.whois));
-  if (d.hostname) html += renderSection('Reverse DNS', renderKv({hostname: d.hostname}));
-  if (Array.isArray(d.a_records) && d.a_records.length) {
-    html += renderSection('A records', renderChips(d.a_records));
+  if (d.wildcard_dns) html += renderSection('Wildcard DNS', renderKv(d.wildcard_dns), 'dig');
+  if (Array.isArray(d.ct) && d.ct.length) {
+    html += renderSection('Certificate transparency (' + d.ct.length + ')',
+                          renderChips(d.ct), 'crt.sh');
   }
-  if (d.shodan) {
-    var ports = Array.isArray(d.shodan.ports) ? d.shodan.ports : null;
-    if (ports && ports.length) {
-      html += renderSection('Open ports (Shodan)', renderChips(ports));
-    }
-    if (d.shodan.hostnames) {
-      html += renderSection('Hostnames (Shodan)', renderChips(d.shodan.hostnames));
-    }
-  }
-  html += renderGeneric(d, ['geo', 'whois', 'hostname', 'a_records', 'shodan', 'ip']);
+  html += renderGeneric(d, ['whois', 'dns_records', 'dns_email_security',
+                            'wildcard_dns', 'ct']);
   return html;
 }
 
@@ -1327,13 +1470,16 @@ function renderDarkweb(d) {
     html += renderSection('Ahmia index hits (' + d.ahmia.length + ')',
       renderLinkTable(d.ahmia.map(function (h) {
         return { domain: h.title || h.name || h, url: h.url || h.link || '' };
-      }), 20));
+      }), 20), 'Ahmia');
   } else if (d.ahmia) {
-    html += renderStatusLine('Ahmia index', 'no hits', false);
+    html += renderSection('Ahmia index',
+      renderStatusLine('Result', 'no hits', false), 'Ahmia');
   }
-  if (d.breach) html += renderSection('Breach check', renderBreach(d.breach));
+  if (d.breach) html += renderSection('Breach check', renderBreach(d.breach), 'breach');
   if (d.pwned !== undefined) {
-    html += renderStatusLine('Have I Been Pwned', d.pwned ? 'PWNED (' + d.count + ' breaches)' : 'not found', !d.pwned);
+    html += renderSection('Have I Been Pwned',
+      renderStatusLine('Result', d.pwned ? 'PWNED (' + d.count + ' breaches)' : 'not found',
+                       !d.pwned), 'HIBP');
   }
   html += renderGeneric(d, ['ahmia', 'breach', 'pwned', 'count', 'query', 'type']);
   return html;
@@ -1343,7 +1489,7 @@ function renderDarkweb(d) {
 function renderOpsec(d) {
   var html = '';
   if (d.direct) {
-    html += renderSection('Direct connection (no proxy)', renderKv(d.direct));
+    html += renderSection('Direct connection (no proxy)', renderKv(d.direct), 'opsec');
   }
   if (d.proxy_configured !== undefined) {
     html += renderStatusLine('Proxy configured', d.proxy_configured ? 'yes' : 'no', !!d.proxy_configured);
@@ -1355,7 +1501,7 @@ function renderOpsec(d) {
     html += renderSection('Recommendations',
       '<ul class="res-list">' + d.recommendations.map(function (r) {
         return '<li>' + escapeHtml(r) + '</li>';
-      }).join('') + '</ul>');
+      }).join('') + '</ul>', 'opsec');
   }
   html += renderGeneric(d, ['direct', 'proxy_configured', 'dns_leak', 'recommendations']);
   return html;
@@ -1411,12 +1557,25 @@ function renderLens(d) {
 
 /* ── Cross-tool investigation ──
  *
- * Matches sort first: they are the verdict, info rows are context. A
- * matched value also lights up wherever it appears in the entity chips,
- * so the link between "correlated" and "where" needs no scrolling. The
- * graph is a summary visual only — center is the queried input, ring
- * nodes are entity kinds with real counts, nothing weighted or inferred. */
+ * A resolved run leads with the person card: identity, accounts, breaches,
+ * links and conflicts. The module payloads, correlator index and social
+ * diagnostics move into Details. Legacy stored runs (no `person` block)
+ * keep the older entities-first layout.
+ *
+ * Matches sort first in the legacy layout: they are the verdict, info rows
+ * are context. The graph is a summary visual only — center is the queried
+ * input, ring nodes are entity kinds with real counts, nothing weighted. */
 function renderInvestigate(d) {
+  if (d.person && typeof d.person === 'object') return renderPerson(d);
+  var html = renderCorrelatorSections(d);
+  html += renderModuleSections(d, false);
+  html += renderGeneric(d, ['inputs', 'entities', 'correlations', 'results',
+                            'ip_recon', 'social', 'progress', 'summary',
+                            'person', 'person_error']);
+  return html;
+}
+
+function renderCorrelatorSections(d, entityLabel, compact) {
   var html = '';
   var matchValues = [];
   (d.correlations || []).forEach(function (c) {
@@ -1428,48 +1587,275 @@ function renderInvestigate(d) {
     }
   });
   if (d.entities) {
-    var entHtml = renderEntityGraph(d);
-    [['emails', 'Emails'], ['domains', 'Domains'], ['ips', 'IP addresses'],
-     ['phones', 'Phone numbers'], ['orgs', 'Organizations'], ['asns', 'ASNs']].forEach(function (pair) {
-      var values = d.entities[pair[0]];
-      if (Array.isArray(values) && values.length) {
-        entHtml += '<p class="res-line dim">' + pair[1] + ':</p>' + matchChips(values, matchValues);
+    if (compact) {
+      /* Under a person card the graph is already on the face as Accounts
+       * and Links; a second diagram in Details just repeats it. Keep the
+       * entity index as a compact grid. */
+      var entGrid = personIdentityGrid([
+        ['Emails', d.entities.emails], ['Domains', d.entities.domains],
+        ['IP addresses', d.entities.ips], ['Phones', d.entities.phones],
+        ['Organizations', d.entities.orgs], ['ASNs', d.entities.asns],
+        ['Regions', d.entities.regions],
+      ]);
+      if (entGrid) {
+        html += renderSection(entityLabel || 'Entities', entGrid, 'correlator');
       }
-    });
-    html += renderSection('Entities', entHtml);
+    } else {
+      var entHtml = renderEntityGraph(d);
+      [['emails', 'Emails'], ['domains', 'Domains'], ['ips', 'IP addresses'],
+       ['phones', 'Phone numbers'], ['orgs', 'Organizations'], ['asns', 'ASNs']].forEach(function (pair) {
+        var values = d.entities[pair[0]];
+        if (Array.isArray(values) && values.length) {
+          entHtml += '<p class="res-line dim">' + pair[1] + ':</p>' + matchChips(values, matchValues);
+        }
+      });
+      html += renderSection(entityLabel || 'Entities', entHtml, 'correlator');
+    }
   }
   if (Array.isArray(d.correlations) && d.correlations.length) {
     var corrs = d.correlations.slice().sort(function (a, b) {
       return ((b && b.type === 'match') - (a && a.type === 'match'));
     });
     var matches = corrs.filter(function (c) { return c && c.type === 'match'; }).length;
-    html += renderSection('Correlations (' + corrs.length + (matches ? ', ' + matches + ' match' +
-      (matches === 1 ? '' : 'es') : '') + ')',
-      '<ul class="res-list corr-list">' + corrs.map(function (c) {
-        var isMatch = c.type === 'match';
-        var out = '<li class="' + (isMatch ? 'corr-match' : '') + '">' +
-          (isMatch ? '<span class="artifact-kind">match</span> ' : '') +
-          '<strong>' + escapeHtml(c.desc || c.type || '') + '</strong>';
-        if (c.detail) out += '<br>' + corrDetailChips(String(c.detail), isMatch);
-        return out + '</li>';
-      }).join('') + '</ul>');
+    var title = 'Correlations (' + corrs.length + (matches ? ', ' + matches + ' match' +
+      (matches === 1 ? '' : 'es') : '') + ')';
+    if (compact) {
+      var rows = corrs.map(function (c) {
+        var isMatch = c && c.type === 'match';
+        return '<li class="person-link">' +
+          '<span class="person-conf ' +
+          (isMatch ? 'person-conf-high' : 'person-conf-unconfirmed') + '">' +
+          escapeHtml(isMatch ? 'match' : 'info') + '</span>' +
+          '<span class="person-link-body"><span class="person-link-desc">' +
+          escapeHtml(c.desc || c.type || '') + '</span>' +
+          (c.detail ? '<span class="person-link-detail">' +
+            escapeHtml(String(c.detail)) + '</span>' : '') +
+          '</span></li>';
+      }).join('');
+      html += renderSection(title, '<ul class="person-links">' + rows + '</ul>', 'correlator');
+    } else {
+      html += renderSection(title,
+        '<ul class="res-list corr-list">' + corrs.map(function (c) {
+          var isMatch = c.type === 'match';
+          var out = '<li class="' + (isMatch ? 'corr-match' : '') + '">' +
+            (isMatch ? '<span class="artifact-kind">match</span> ' : '') +
+            '<strong>' + escapeHtml(c.desc || c.type || '') + '</strong>';
+          if (c.detail) out += '<br>' + corrDetailChips(String(c.detail), isMatch);
+          return out + '</li>';
+        }).join('') + '</ul>', 'correlator');
+    }
   }
+  return html;
+}
+
+function renderModuleSections(d, includeSocialDetails) {
+  var html = '';
   if (d.results && typeof d.results === 'object') {
     Object.keys(d.results).forEach(function (key) {
       var sub = d.results[key];
       if (!sub || typeof sub !== 'object' || sub.error) return;
-      html += renderSection(key + ' (spyglass)', renderBody(sub, key));
+      html += renderSection(key, renderBody(sub, key), 'spyglass');
     });
-  }
-  if (d.ip_recon && !d.ip_recon.error) {
-    html += renderSection('IP recon (Lens-Extender)', renderBody(d.ip_recon, 'lens'));
   }
   if (d.social && !d.social.error) {
     var socialLabel = (d.social.platform || 'social').toUpperCase();
-    html += renderSection(socialLabel + ' profile', renderBody(d.social, 'social'));
+    html += renderSection(socialLabel + ' profile', renderBody(d.social, 'social'), 'social');
+    if (includeSocialDetails) html += renderSocialDetails(d.social);
   }
-  html += renderGeneric(d, ['inputs', 'entities', 'correlations', 'results',
-                            'ip_recon', 'social', 'progress', 'summary']);
+  return html;
+}
+
+/* ── Person card ──
+ *
+ * Values carry their source, and confidence is shown, never implied. A
+ * website's WHOIS data sits in its own context block because it describes
+ * the domain until a value matches an anchor. */
+function personConfidence(value) {
+  var conf = String(value || 'unconfirmed').toLowerCase();
+  return ['high', 'medium', 'possible', 'unconfirmed'].indexOf(conf) !== -1
+    ? conf : 'unconfirmed';
+}
+
+function personEntryChips(items) {
+  if (!Array.isArray(items) || !items.length) return '';
+  var html = '<div class="person-values">';
+  items.forEach(function (item) {
+    var value = item;
+    var source = '';
+    var confidence = '';
+    var context = false;
+    if (item && typeof item === 'object') {
+      value = item.value;
+      source = item.source || '';
+      confidence = item.confidence || '';
+      context = !!item.context;
+    }
+    if (value === null || value === undefined || value === '') return;
+    var meta = [];
+    if (source) meta.push(source);
+    if (confidence === 'possible' || confidence === 'medium') meta.push(confidence);
+    if (context) meta.push('context');
+    html += '<span class="person-value">' +
+            '<span class="chip">' + escapeHtml(String(value)) + '</span>' +
+            (meta.length ? '<span class="person-source">' +
+              escapeHtml(meta.join(' · ')) + '</span>' : '') +
+            '</span>';
+  });
+  return html + '</div>';
+}
+
+/* Identity and context share one compact two-column grid. A table here
+ * made every value a full-width row with its own provenance line; the
+ * grid keeps the same information at roughly half the height. */
+function personIdentityGrid(pairs) {
+  var html = '';
+  pairs.forEach(function (pair) {
+    var values = personEntryChips(pair[1]);
+    if (!values) return;
+    html += '<div class="person-identity-item">' +
+            '<span class="person-identity-label">' + escapeHtml(pair[0]) + '</span>' +
+            values + '</div>';
+  });
+  return html ? '<div class="person-identity-grid">' + html + '</div>' : '';
+}
+
+function renderPerson(d) {
+  var p = d.person || {};
+  var confidence = personConfidence(p.confidence);
+  var html = '';
+
+  var identity = personIdentityGrid([
+    ['Names', p.names], ['Handles', p.handles], ['Emails', p.emails],
+    ['Phones', p.phones], ['Locations', p.locations],
+    ['Organizations', p.organizations], ['Domains', p.domains],
+    ['Websites', p.websites],
+  ]);
+  if (identity) {
+    html += renderSection('Identity', identity, 'correlator', {
+      text: confidence,
+      confidence: confidence,
+    });
+  }
+
+  var accounts = Array.isArray(p.accounts) ? p.accounts : [];
+  if (accounts.length) {
+    var shown = accounts.slice(0, 50);
+    var table = '<table class="res-table person-accounts"><thead><tr>' +
+                '<th>Account</th><th>Linked by</th><th>Found by</th>' +
+                '</tr></thead><tbody>';
+    shown.forEach(function (a) {
+      var url = String(a.url || '');
+      var href = url ? safeHref(url) : '';
+      var urlLine = href
+        ? '<a class="person-account-url" href="' + escapeHtml(href) +
+          '" target="_blank" rel="noopener" title="' + escapeHtml(url) + '">' +
+          escapeHtml(url) + '</a>'
+        : (url ? '<span class="person-account-url dim" title="' + escapeHtml(url) + '">' +
+                 escapeHtml(url) + '</span>' : '');
+      var tools = (a.tools || []).map(function (tool) {
+        return '<span class="result-tool">' + escapeHtml(tool) + '</span>';
+      }).join(' ');
+      var evidence = personConfidence(a.confidence);
+      table += '<tr><td><div class="person-account-name">' +
+               '<span class="person-account-platform">' + escapeHtml(a.platform || '') +
+               '</span><span class="person-evidence person-evidence-' + evidence +
+               '" title="Account confidence">' +
+               escapeHtml(evidence) + '</span></div>' + urlLine + '</td><td>' +
+               escapeHtml((a.via || []).join(' + ')) + '</td><td>' +
+               (tools || '<span class="dim">—</span>') + '</td></tr>';
+    });
+    if (accounts.length > shown.length) {
+      table += '<tr><td colspan="3" class="dim">+ ' + (accounts.length - shown.length) +
+               ' more in Raw JSON</td></tr>';
+    }
+    table += '</tbody></table>';
+    html += renderSection('Accounts (' + accounts.length + ')', table);
+  }
+
+  var breaches = Array.isArray(p.breaches) ? p.breaches : [];
+  if (breaches.length) {
+    var btable = '<table class="res-table person-breaches"><thead><tr>' +
+                 '<th>Source</th><th>Date</th><th>Via</th></tr></thead><tbody>';
+    breaches.forEach(function (b) {
+      var name = String(b.name || 'unknown');
+      if (b.count) name += ' (' + b.count + ' records)';
+      btable += '<tr><td>' + escapeHtml(name) + '</td><td>' +
+                escapeHtml(b.date || '—') + '</td><td>' +
+                escapeHtml((b.via || []).join(', ') || '—') + '</td></tr>';
+    });
+    btable += '</tbody></table>';
+    if (Array.isArray(p.exposed_fields) && p.exposed_fields.length) {
+      btable += '<p class="person-caption">Exposed fields: ' +
+                escapeHtml(p.exposed_fields.join(', ')) + '</p>';
+    }
+    html += renderSection('Breaches (' + breaches.length + ')', btable, 'breach');
+  }
+
+  var links = Array.isArray(p.links) ? p.links : [];
+  if (links.length) {
+    var confirmed = links.filter(function (l) { return l.confidence === 'high'; }).length;
+    var list = '<ul class="person-links">' + links.map(function (l) {
+      var conf = personConfidence(l.confidence);
+      return '<li class="person-link">' +
+        '<span class="person-conf person-conf-' + conf + '">' + escapeHtml(conf) +
+        '</span><span class="person-link-body">' +
+        '<span class="person-link-desc">' + escapeHtml(l.desc || '') + '</span>' +
+        (l.detail ? '<span class="person-link-detail">' +
+          escapeHtml(String(l.detail)) + '</span>' : '') +
+        '</span></li>';
+    }).join('') + '</ul>';
+    html += renderSection('Links (' + links.length +
+      (confirmed ? ', ' + confirmed + ' confirmed' : '') + ')', list, 'correlator');
+  }
+
+  var conflicts = Array.isArray(p.conflicts) ? p.conflicts : [];
+  if (conflicts.length) {
+    var clist = '<ul class="person-links">' + conflicts.map(function (c) {
+      var values = Array.isArray(c.values) ? c.values : [];
+      return '<li class="person-link person-conflict-row">' +
+        '<span class="person-conf person-conf-possible">' +
+        escapeHtml(c.kind || 'conflict') + '</span>' +
+        '<span class="person-link-body"><span class="person-link-desc">' +
+        escapeHtml(c.desc || '') + '</span>' +
+        (values.length ? '<span class="person-link-detail">' +
+          escapeHtml(values.join(' · ')) + '</span>' : '') +
+        '</span></li>';
+    }).join('') + '</ul>';
+    html += renderSection('Conflicts (' + conflicts.length + ')', clist, 'correlator');
+  }
+
+  var context = p.context || {};
+  var contextGrid = personIdentityGrid([
+    ['Organizations', context.organizations], ['Names', context.names],
+    ['Emails', context.emails], ['Phones', context.phones],
+    ['Locations', context.locations],
+  ]);
+  if (contextGrid) {
+    var lead = context.website
+      ? 'WHOIS data describes ' + context.website + ', not necessarily the person.'
+      : 'WHOIS data describes the domain, not necessarily the person.';
+    html += renderSection('Domain context',
+      '<p class="person-caption">' + escapeHtml(lead) + '</p>' + contextGrid,
+      'whois');
+  }
+
+  if (!html) {
+    html = '<p class="dim">No identity signals resolved from this run.</p>';
+  }
+  return html;
+}
+
+function renderInvestigateDetails(d) {
+  if (!d || !d.person || typeof d.person !== 'object') return '';
+  var html = renderCorrelatorSections(d, 'Entity index', true);
+  html += renderModuleSections(d, true);
+  var notes = Array.isArray(d.person.notes) ? d.person.notes : [];
+  if (notes.length) {
+    html += '<span class="result-subtitle">Identity notes</span>';
+    notes.forEach(function (note) {
+      html += '<p class="res-line">' + escapeHtml(note) + '</p>';
+    });
+  }
   return html;
 }
 
@@ -1650,10 +2036,8 @@ var TOOL_ROWS = [
   { label: 'Email', tools: ['holehe', 'user-scanner', 'blackbird'], note: '+ breach data' },
   { label: 'Username', tools: ['user-scanner', 'sherlock', 'maigret', 'blackbird'], note: '+ breach data' },
   { label: 'Phone', tools: ['ignorant', 'phoneinfoga'], note: '+ breach data' },
-  { label: 'Website', tools: ['dig', 'whois', 'curl'] },
-  { label: 'IP address', tools: ['shodan'] },
+  { label: 'Website', tools: ['dig', 'whois'], note: 'light: owner / DNS / CT' },
   { label: 'Dark web', keys: [['intelx_api_key', 'IntelX'], ['hibp_api_key', 'HIBP']], note: 'Ahmia + breach keyless' },
-  { label: 'Enrichment', keys: [['shodan_api_key', 'Shodan'], ['virustotal_api_key', 'VirusTotal'], ['abuseipdb_api_key', 'AbuseIPDB'], ['censys_api_key', 'Censys'], ['greynoise_api_key', 'GreyNoise'], ['nvd_api_key', 'NVD']] },
   { label: 'Metadata', tools: ['exiftool'] },
   { label: 'Social', platforms: true }
 ];
@@ -1848,18 +2232,32 @@ function loadCases() {
 
 function deleteCase(runId, qtype, btn) {
   if (!runId) return;
-  if (!window.confirm('Delete stored run #' + runId + ' (' + (qtype || 'unknown type') + ')? Its entities leave the index too.')) return;
-  if (btn) btn.disabled = true;
-  apiFetch('/api/cases/run?id=' + encodeURIComponent(runId) + '&qtype=' + encodeURIComponent(qtype || ''), {
-    method: 'DELETE'
-  }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
-    .then(function (res) {
-      if (!res.ok) { showToast('Error: ' + (res.data.error || 'delete failed'), 'error'); return; }
-      showToast('Deleted stored run #' + runId, 'success');
-      loadCases();
-    }).catch(function (err) {
-      showToast('Error: ' + err.message, 'error');
-    });
+  var kind = qtype || 'unknown type';
+  confirmAction({
+    kicker: 'Delete stored run',
+    title: 'Delete case #' + runId + '?',
+    body: 'The ' + kind + ' run and its entities leave the index. This cannot be undone.',
+    cancelLabel: 'Keep case',
+    confirmLabel: 'Delete case'
+  }).then(function (ok) {
+    if (!ok) return;
+    if (btn) btn.disabled = true;
+    apiFetch('/api/cases/run?id=' + encodeURIComponent(runId) + '&qtype=' + encodeURIComponent(qtype || ''), {
+      method: 'DELETE'
+    }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          if (btn) btn.disabled = false;
+          showToast('Error: ' + (res.data.error || 'delete failed'), 'error');
+          return;
+        }
+        showToast('Case deleted — run #' + runId, 'success');
+        loadCases();
+      }).catch(function (err) {
+        if (btn) btn.disabled = false;
+        showToast('Error: ' + err.message, 'error');
+      });
+  });
 }
 
 function casesQuery(kind) {

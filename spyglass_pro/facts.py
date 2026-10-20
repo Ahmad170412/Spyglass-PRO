@@ -52,7 +52,6 @@ _TARGET_KIND = {
     "username": "username",
     "phone": "phone",
     "website": "domain",
-    "ip": "ip",
 }
 
 # Response-level keys that describe the *run*, not the findings. They must
@@ -320,16 +319,14 @@ def _extract_phone(d, out):
 
 def _extract_website(d, out):
     src = "spyglass_osint"
-    _fact(out, "page_title", "Page title", d.get("title"), src)
-    _fact(out, "http_status", "HTTP status", d.get("status_code"), src)
-    if "subdomains" in d:
-        _fact(out, "subdomains", "Subdomains found",
-              _count(d.get("subdomains")), src)
     records = d.get("dns_records")
     if isinstance(records, dict) and records.get("A"):
         a_count = len([p for p in str(records["A"]).replace(", ", ",").split(",")
                        if p.strip()])
         _fact(out, "a_records", "DNS A records", a_count, src)
+    if d.get("ct"):
+        _fact(out, "ct_names", "Certificate transparency names",
+              _count(d.get("ct")), src)
     whois = d.get("whois")
     _fact(out, "whois_org", "Registrant org",
           _first(whois, ("Organization", "OrgName", "org", "Org")), "whois")
@@ -338,7 +335,6 @@ def _extract_website(d, out):
     _fact(out, "whois_created", "Registered",
           _first(whois, ("Creation Date", "Created", "created",
                         "Registration Date")), "whois")
-    _flat(out, d.get("dns"), "dns", "dns", cap=8)
 
 
 def _extract_ip(d, out):
@@ -427,6 +423,19 @@ def _extract_investigate(d, out):
             legs += 1
     if any(key in d for key in ("results", "ip_recon", "social")):
         _fact(out, "legs", "Recon legs run", legs, src)
+    person = d.get("person")
+    if isinstance(person, dict):
+        counts = person.get("counts")
+        if isinstance(counts, dict):
+            for key, label in (("anchors", "Identity anchors"),
+                               ("accounts", "Accounts resolved"),
+                               ("confirmed_links", "Confirmed identity links"),
+                               ("possible_links", "Possible identity leads"),
+                               ("conflicts", "Identity conflicts"),
+                               ("breaches", "Breach sources")):
+                _fact(out, f"person_{key}", label, counts.get(key), "identity")
+        _fact(out, "person_confidence", "Identity confidence",
+              person.get("confidence"), "identity", "medium")
 
 
 def _extract_social(d, out):
@@ -468,7 +477,6 @@ _EXTRACTORS = {
     "username": _extract_username,
     "phone": _extract_phone,
     "website": _extract_website,
-    "ip": _extract_ip,
     "darkweb": _extract_darkweb,
     "opsec": _extract_opsec,
     "metadata": _extract_metadata,

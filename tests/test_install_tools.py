@@ -87,9 +87,7 @@ class CoverageTest(unittest.TestCase):
             "phoneinfoga": "phoneinfoga",
             "dig": "sysutils",
             "whois": "sysutils",
-            "shodan": "shodan",
             "exiftool": "exiftool",
-            "curl": "sysutils",
         }
         self.assertEqual(set(_TOOL_PROBES), set(covered_by))
         for key in covered_by.values():

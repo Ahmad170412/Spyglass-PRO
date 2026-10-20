@@ -166,6 +166,8 @@ def _entities(result, qtype):
             add("ip", ip)
         for d in result.get("subdomains", []) or []:
             add("domain", d)
+        for d in result.get("ct", []) or []:
+            add("domain", d)
         for d in result.get("csp_domains", []) or []:
             add("domain", d)
         for d in _csv_split(result.get("tls", {}).get("san", "")):
