@@ -79,5 +79,58 @@ class ToolGridContractTest(unittest.TestCase):
         self.assertEqual(darkweb_ids, {"intelx_api_key", "hibp_api_key"})
 
 
+class TemplateStructureTest(unittest.TestCase):
+    """``index.html`` must stay a single, well-formed document.
+
+    A botched edit once appended a second copy of the file's tail after
+    the first ``</html>``: two ``<script src=app.js>`` tags executed the
+    whole dashboard twice, binding every handler twice (one submit ran
+    the scan twice) while 38 duplicate ids made ``getElementById``
+    silently target the first copy. No test read the template, so the
+    suite stayed green. These checks parse the template directly.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.html = (_ROOT / "spyglass_pro" / "templates" / "index.html").read_text(
+            encoding="utf-8")
+
+    def test_single_document(self):
+        """One doctype, one ``</html>``, one app.js script tag — a second
+        copy anywhere means handlers and init run more than once."""
+        for marker in ("<!DOCTYPE", "</html>", "</body>"):
+            self.assertEqual(self.html.count(marker), 1,
+                             f"expected exactly one {marker}")
+        self.assertEqual(self.html.count("src=\"/static/js/app.js\""), 1,
+                         "app.js must load exactly once")
+
+    def test_ids_are_unique(self):
+        """Duplicate ids are invalid HTML: listeners, ``label[for]`` and
+        ``getElementById`` all silently bind to the first copy while the
+        second renders dead markup nobody can reach."""
+        ids = re.findall(r"\bid=\"([^\"]+)\"", self.html)
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        self.assertEqual(dupes, [], f"duplicate ids: {dupes}")
+
+
+class StyleFloorTest(unittest.TestCase):
+    """No visible text below 10px.
+
+    Compressed labels were the dashboard's recurring complaint: the
+    history rail shipped an 8.5px tag and a 9.5px caption, and nine
+    more badges hid under the floor in result and person blocks. A 1px
+    saving on a badge costs more in legibility than it buys in layout,
+    so the stylesheet has one floor and this test holds it.
+    """
+
+    def test_no_font_size_below_ten_px(self):
+        css = (_ROOT / "spyglass_pro" / "static" / "css" / "style.css").read_text(
+            encoding="utf-8")
+        sizes = re.findall(r"font-size:\s*([0-9.]+)px", css)
+        too_small = sorted({s for s in sizes if 0 < float(s) < 10}, key=float)
+        self.assertEqual(too_small, [],
+                         f"sub-10px text in style.css: {too_small}")
+
+
 if __name__ == "__main__":
     unittest.main()

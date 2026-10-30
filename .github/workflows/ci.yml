@@ -120,7 +120,7 @@ jobs:
             grep -q "spyglass_pro/modules/$pkg/__init__.py" wheel-listing.txt \
               || { echo "MISSING vendored package: $pkg"; exit 1; }
           done
-          echo "wheel carries LICENSE, NOTICE, MIT metadata and all three vendored engines"
+          echo "wheel carries LICENSE, NOTICE, MIT metadata and the vendored engine packages"
       - name: The sdist must not carry local working drafts
         # MANIFEST.in does not read .gitignore: a draft that is ignored in git
         # can still be copied into the sdist by `python -m build`.

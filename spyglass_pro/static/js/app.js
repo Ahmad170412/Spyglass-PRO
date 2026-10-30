@@ -62,6 +62,9 @@ document.addEventListener('DOMContentLoaded', function () {
     /* Re-read on open: runs stored by another tab or a CLI scan since the
        last load belong in the table too. */
     if (panelId === 'cases') loadCases();
+    /* Fresh on open: another tab may have added or checked a target. */
+    if (panelId === 'targets') loadTargets();
+    if (panelId === 'settings') loadBurnerSettings();
   }
 
   navItems.forEach(function (item) {
@@ -155,45 +158,9 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
 
-      if (api === 'social') {
-        var platform = (document.getElementById('socialPlatform') || {}).value || '';
-        if (!platform) {
-          setLoading(btn, false);
-          clearScan(resultsId);
-          /* The tab sets the platform, so an empty value means the
-             registry has not answered yet — not a missing choice. */
-          showToast('Platforms are still loading', 'error');
-          return;
-        }
-        var payload = { platform: platform, handle: target };
-        Object.keys(flags).forEach(function (k) { payload[k] = flags[k]; });
-        /* Keyless adapters (Mastodon, Bluesky) fetch public JSON — browser
-           flags are inert server-side, so strip them instead of sending
-           options the engine will ignore. */
-        if (SOCIAL_META[platform] && !SOCIAL_META[platform].browser) {
-          delete payload.headless;
-          delete payload.deep;
-          delete payload.media;
-        }
-        var burnerOn = document.getElementById('burnerEnabled');
-        var burnerUser = document.getElementById('burnerUser');
-        var burnerPass = document.getElementById('burnerPass');
-        payload.burner_enabled = !!(burnerOn && burnerOn.checked);
-        payload.burner_username = burnerUser ? burnerUser.value.trim() : '';
-        payload.burner_password = burnerPass ? burnerPass.value : '';
-        if (payload.burner_enabled && (!payload.burner_username || !payload.burner_password)) {
-          setLoading(btn, false);
-          clearScan(resultsId);
-          showToast('Burner login needs a username and password', 'error');
-          return;
-        }
-        runAsyncScan({
-          url: '/api/social/run', method: 'POST', body: payload,
-          resultsId: resultsId, target: target, qtype: 'social', btn: btn
-        });
-        return;
-      }
-
+      /* Social checks no longer ride this dispatcher: form-social has no
+         data-api because a check only exists against a tracked target —
+         the TARGETS/CHECK AGAIN flow (checkTarget below) owns it. */
       setLoading(btn, false);
       clearScan(resultsId);
       showToast('Unknown API: ' + api, 'error');
@@ -529,13 +496,13 @@ function preflightHtml(qtype) {
     bits.push(have.length + '/' + needed.length + ' tools detected' +
       (missing.length ? ' — missing ' + missing.join(', ') : ' — ' + needed.join(', ')));
   } else if (qtype === 'social') {
-    /* No CLI legs and no keys: the panel is the registry. An empty
-       tools bit here once rendered "0/0 tools detected", which reads as
-       broken rather than keyless. */
+    /* No CLI legs and no keys: the panel is the registry. A healthy
+       social scan adds NO detail line — the platform roll-call is
+       documentation, not scan status, and it added a line of noise to
+       every run. The badge alone is the answer; only a dead engine
+       speaks. */
     var nplats = ((STATUS && STATUS.platforms) || []).length;
-    if (nplats) {
-      bits.push(nplats + ' platforms: stealth-browser Instagram + keyless Mastodon/Bluesky');
-    } else {
+    if (!nplats) {
       full = false;
       bits.push('social engine failed to load');
     }
@@ -565,6 +532,7 @@ function preflightHtml(qtype) {
   }
   if (!bits.length) {
     if (!STATUS) return '<span class="power-badge partial">CHECKING TOOLS…</span>';
+    if (qtype === 'social') return '<span class="power-badge full">FULL POWER</span>';
     return '<span class="power-badge full">FULL POWER</span><span class="preflight-detail">keyless legs + breach data</span>';
   }
   return '<span class="power-badge ' + (full ? 'full' : 'partial') + '">' +
@@ -616,6 +584,9 @@ function runAsyncScan(opts) {
     if (scan && scan.cancelled) return;
     setLoading(btn, false);
     clearScan(resultsId);
+    /* A request-level failure never reaches onDone — tell the caller so
+       a scan-mode UI can restore itself instead of hiding forever. */
+    if (opts.onFail) opts.onFail(err);
     showToast('Error: ' + err.message, 'error');
   });
 }
@@ -692,6 +663,7 @@ function pollJob(jobId, opts, seen) {
   apiFetch('/api/job/' + encodeURIComponent(jobId)).then(function (r) { return r.json(); }).then(function (job) {
     var cur = activeScans[resultsId];
     if (!cur || cur.cancelled) return;
+    cur.pollFails = 0;
     if (job.error && job.error.indexOf('unknown job') === 0) {
       finishAsyncScan(opts, { error: job.error });
       return;
@@ -706,6 +678,16 @@ function pollJob(jobId, opts, seen) {
   }).catch(function (err) {
     var cur = activeScans[resultsId];
     if (!cur || cur.cancelled) return;
+    /* A server restart mid-scan used to retry forever: the card sat on
+       "scan in progress" with a ticking timer and lines that would never
+       come. Bounded now — a minute of refused connections means the
+       server is gone, so say so instead of pretending to still scan. */
+    cur.pollFails = (cur.pollFails || 0) + 1;
+    if (cur.pollFails > 20) {
+      finishAsyncScan(opts, { error: 'connection to the server was lost — ' +
+        'this check may have finished on the server side; reload the page to see it' });
+      return;
+    }
     cur.pollTimer = setTimeout(function () { pollJob(jobId, opts, seen); }, 3000);
   });
 }
@@ -862,8 +844,6 @@ var RENDERERS = [
              d.entities !== undefined || d.person !== undefined;
     },
     render: renderInvestigate, details: renderInvestigateDetails },
-  { name: 'lens',       matches: function (d) { return d.resolved_ip !== undefined || d.input_type !== undefined; },
-    render: renderLens },
   { name: 'opsec',      matches: function (d) { return d.direct !== undefined && d.recommendations !== undefined; },
     render: renderOpsec },
   { name: 'phone',      matches: function (d) { return d.phonenumbers !== undefined; },
@@ -1080,6 +1060,9 @@ function selectSocialPlatform(key) {
   if (name) name.textContent = socialLabel(key);
   setSocialPlaceholder(key);
   updateSocialCaps(null);
+  /* The tab *is* the dashboard: switching platforms re-resolves that
+     platform's tracked target and repaints stats/diff/history. */
+  loadSocialDashboard(key);
 }
 
 function setSocialPlaceholder(key) {
@@ -1128,6 +1111,17 @@ function loadSocialPlatforms() {
       if (name) name.textContent = socialLabel(want);
       setSocialPlaceholder(want);
       showCaps(list, want);
+      /* The Targets add-form rides the same registry: one source of
+         platform truth for every picker in the app. */
+      var targetSel = document.getElementById('targetPlatform');
+      if (targetSel) {
+        var keep = targetSel.value;
+        targetSel.innerHTML = list.map(function (p) {
+          return '<option value="' + escapeHtml(p.key) + '">' +
+            escapeHtml(p.label || p.key) + '</option>';
+        }).join('');
+        if (keep) targetSel.value = keep;
+      }
     })
     .catch(function () {
       /* A failed registry fetch must not blank the operator's explicit
@@ -1157,18 +1151,17 @@ function updateSocialCaps(platforms) {
 
 function showCaps(platforms, key) {
   var caps = document.getElementById('socialCaps');
-  if (!caps) return;
-  var match = (platforms || []).filter(function (p) { return p.key === key; })[0];
-  var keyless = !!match && match.browser === false;
-  var burnerRow = document.getElementById('burnerRow');
-  if (burnerRow) burnerRow.style.display = (match && match.login && match.login !== 'none') ? '' : 'none';
-  var form = document.getElementById('form-social');
-  var browserOpts = form ? form.querySelectorAll('[data-browser-only]') : [];
-  /* Headless / Deep / Download Media drive the stealth browser, which
-     keyless adapters never launch — offering them there implies stories
-     and media downloads that do not exist on those tabs. An unknown
-     platform hides them too: we cannot claim what it needs, and a
-     generic form is safer than one tuned for a different platform. */
+  if (!caps) return;      var match = (platforms || []).filter(function (p) { return p.key === key; })[0];
+      var keyless = !!match && match.browser === false;
+      var form = document.getElementById('form-social');
+      var browserOpts = form ? form.querySelectorAll('[data-browser-only]') : [];
+      /* Headless / Deep / Download Media drive the stealth browser, which
+         keyless adapters never launch — offering them there implies stories
+         and media downloads that do not exist on those tabs. An unknown
+         platform hides them too: we cannot claim what it needs, and a
+         generic form is safer than one tuned for a different platform.
+         The burner itself lives in Settings now (it is account config, not
+         target config), so there is no row here to toggle. */
   for (var i = 0; i < browserOpts.length; i++) {
     browserOpts[i].style.display = (match && !keyless) ? '' : 'none';
   }
@@ -1510,54 +1503,6 @@ function renderOpsec(d) {
       }).join('') + '</ul>', 'opsec');
   }
   html += renderGeneric(d, ['direct', 'proxy_configured', 'dns_leak', 'recommendations']);
-  return html;
-}
-
-/* ── Lens-Extender ── */
-function renderLens(d) {
-  var html = '';
-  html += renderKv(d, {target: 'Target', input_type: 'Input type', resolved_ip: 'Resolved IP',
-                       reverse_dns: 'Reverse DNS', shodan_org: 'Shodan org', shodan_isp: 'Shodan ISP'});
-  if (d.geo) html += renderSection('GeoIP', renderKv(d.geo));
-  if (d.rdap) html += renderSection('RDAP', renderKv(d.rdap));
-  if (Array.isArray(d.ports) && d.ports.length) {
-    html += renderSection('Ports (' + d.ports.length + ')',
-      '<table class="res-table"><thead><tr><th>Port</th><th>Protocol</th><th>Service</th><th>Version</th></tr></thead><tbody>' +
-      d.ports.map(function (p) {
-        return '<tr><td>' + escapeHtml(String(p.port)) + '</td><td>' + escapeHtml(String(p.protocol)) + '</td><td>' +
-               escapeHtml(String(p.service || '—')) + '</td><td>' + escapeHtml(String(p.version || '—')) + '</td></tr>';
-      }).join('') + '</tbody></table>');
-  }
-  if (Array.isArray(d.software) && d.software.length) {
-    html += renderSection('Software (' + d.software.length + ')',
-      '<table class="res-table"><thead><tr><th>Type</th><th>Vendor</th><th>Product</th><th>Version</th></tr></thead><tbody>' +
-      d.software.map(function (s) {
-        return '<tr><td>' + escapeHtml(String(s.type || '—')) + '</td><td>' + escapeHtml(String(s.vendor || '—')) + '</td><td>' +
-               escapeHtml(String(s.product || '—')) + '</td><td>' + escapeHtml(String(s.version || '—')) + '</td></tr>';
-      }).join('') + '</tbody></table>');
-  }
-  if (Array.isArray(d.vulns) && d.vulns.length) {
-    html += renderSection('Vulnerabilities (' + d.vulns.length + ')',
-      '<ul class="res-list">' + d.vulns.map(function (v) {
-        return '<li>' + escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v)) + '</li>';
-      }).join('') + '</ul>');
-  }
-  if (Array.isArray(d.tags) && d.tags.length) html += renderSection('Tags', renderChips(d.tags));
-  if (Array.isArray(d.hostnames) && d.hostnames.length) html += renderSection('Hostnames', renderChips(d.hostnames));
-  if (Array.isArray(d.os_guesses) && d.os_guesses.length) html += renderSection('OS guesses', renderChips(d.os_guesses));
-  if (d.dns_records) html += renderSection('DNS records', renderKv(d.dns_records));
-  if (Array.isArray(d.errors) && d.errors.length) {
-    html += renderSection('Probe errors',
-      '<ul class="res-list">' + d.errors.map(function (e) {
-        return '<li>' + escapeHtml(String(e)) + '</li>';
-      }).join('') + '</ul>');
-  }
-  html += renderGeneric(d, ['target', 'input_type', 'resolved_ip', 'reverse_dns', 'hostnames',
-                            'shodan_org', 'shodan_isp', 'shodan_hostnames', 'http_profiles',
-                            'tls_profiles', 'fcrdns', 'geo', 'rdap', 'ports', 'host_scripts',
-                            'os_guesses', 'software', 'tags', 'cpes', 'certs', 'vulns',
-                            'ripestat', 'greynoise', 'freshness', 'dnsbl', 'dns_records',
-                            'cohosted', 'abuseipdb', 'virustotal', 'whois_domain', 'errors']);
   return html;
 }
 
@@ -2463,3 +2408,1075 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Targets + CHECK AGAIN — the tracked-target flow.
+
+   Targets are managed entities (the TARGETS tab): added once, removed
+   explicitly, rendered as rows. A social platform tab never configures
+   a target — it resolves the one tracked for its platform and becomes
+   its CHECK AGAIN dashboard: identity band, stat deltas, the diff, new
+   posts, and the history rail.
+
+   Honesty rule: every change claim on this screen comes from the
+   server's diff engine (social/diff.py) via the target detail's
+   ``last_diff`` — re-derived with the same engine the check used. This
+   file only renders it. A second, client-side diff implementation is
+   how the UI starts claiming things the engine would refuse.
+   ══════════════════════════════════════════════════════════════ */
+
+var TARGETS_CACHE = [];            // last GET /api/social/targets
+var dashboardTarget = null;        // target the social panel is showing
+var pendingDashboardTarget = null; // explicit pick from a Targets row
+var dashboardHasTarget = false;     // a target resolved on the visible tab
+var dashboardHistory = [];         // newest-first snapshots for this tab
+var dashboardIndex = 0;            // snapshot the main column is showing
+var dashboardDetail = null;        // last target-detail response
+
+var WHEN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/* "28 Oct · 08:29" — one date dialect for the whole flow. */
+function fmtWhen(stamp) {
+  if (!stamp) return '';
+  var d = new Date(stamp);
+  if (isNaN(d.getTime())) return String(stamp).slice(0, 19);
+  var hh = d.getHours() < 10 ? '0' + d.getHours() : '' + d.getHours();
+  var mm = d.getMinutes() < 10 ? '0' + d.getMinutes() : '' + d.getMinutes();
+  return d.getDate() + ' ' + WHEN_MONTHS[d.getMonth()] + ' · ' + hh + ':' + mm;
+}
+
+function findTargetById(id) {
+  for (var i = 0; i < TARGETS_CACHE.length; i++) {
+    if (TARGETS_CACHE[i].id === id) return TARGETS_CACHE[i];
+  }
+  return null;
+}
+
+function socialFieldLabel(key) {
+  if (typeof SOCIAL_FIELDS !== 'undefined' && SOCIAL_FIELDS) {
+    for (var i = 0; i < SOCIAL_FIELDS.length; i++) {
+      if (SOCIAL_FIELDS[i].key === key) return SOCIAL_FIELDS[i].label;
+    }
+  }
+  return key;
+}
+
+function socialFieldType(key) {
+  if (typeof SOCIAL_FIELDS !== 'undefined' && SOCIAL_FIELDS) {
+    for (var i = 0; i < SOCIAL_FIELDS.length; i++) {
+      if (SOCIAL_FIELDS[i].key === key) return SOCIAL_FIELDS[i].type;
+    }
+  }
+  return null;
+}
+
+/* ── The burner account lives in Settings (account config, not target
+   config), kept in this browser and attached to a check payload only
+   for platforms whose registry entry declares a login. ── */
+function loadBurnerConfig() {
+  try {
+    var raw = localStorage.getItem('spyglass_burner');
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+function loadBurnerSettings() {
+  var enabled = document.getElementById('settingsBurnerEnabled');
+  var user = document.getElementById('settingsBurnerUser');
+  var pass = document.getElementById('settingsBurnerPass');
+  if (!enabled && !user && !pass) return;
+  var cfg = loadBurnerConfig() || {};
+  if (enabled) enabled.checked = !!cfg.enabled;
+  if (user) user.value = cfg.username || '';
+  if (pass) pass.value = cfg.password || '';
+}
+
+function saveBurnerSettings() {
+  var enabled = document.getElementById('settingsBurnerEnabled');
+  var user = document.getElementById('settingsBurnerUser');
+  var pass = document.getElementById('settingsBurnerPass');
+  var cfg = {
+    enabled: !!(enabled && enabled.checked),
+    username: user ? user.value.trim() : '',
+    password: pass ? pass.value : ''
+  };
+  var empty = !cfg.enabled && !cfg.username && !cfg.password;
+  try {
+    if (empty) localStorage.removeItem('spyglass_burner');
+    else localStorage.setItem('spyglass_burner', JSON.stringify(cfg));
+  } catch (e) {
+    showToast('Browser storage unavailable — the burner login cannot be kept here.', 'error');
+    return;
+  }
+  if (empty) { showToast('Burner login cleared', 'info'); return; }
+  if (cfg.enabled && !cfg.username) {
+    showToast('Burner enabled — enter the username before running a check.', 'error');
+    return;
+  }
+  showToast('Burner login saved in this browser', 'success');
+}
+
+/* ── Targets tab ── */
+
+function targetRowHtml(t) {
+  var cfg = loadBurnerConfig();
+  var meta = (typeof SOCIAL_META !== 'undefined') && SOCIAL_META ? SOCIAL_META[t.platform] : null;
+  var burner = !!(cfg && cfg.enabled && cfg.username && meta &&
+                  meta.login && meta.login !== 'none');
+  var baseline = t.baseline_at ? 'baseline ' + fmtWhen(t.baseline_at) : 'no checks yet';
+  var right = t.checks
+    ? pluralize(t.checks, 'check') +
+      (t.last_check_at ? ' · last ' + fmtWhen(t.last_check_at) : '')
+    : 'not checked yet';
+  var failed = !!(t.last_status && t.last_status !== 'ok' && t.last_status !== 'partial');
+  return '<div class="trow">' +
+    '<div class="t-n"><b>' + escapeHtml(t.handle) +
+      (burner ? ' <span class="pill">BURNER</span>' : '') + '</b>' +
+      '<span>' + escapeHtml(socialLabel(t.platform)) + ' · ' + escapeHtml(baseline) +
+      (failed ? ' · <span class="status-err">last check failed</span>' : '') + '</span></div>' +
+    '<span class="t-r">' + escapeHtml(right) + '</span>' +
+    '<span class="t-act">' +
+      '<button type="button" class="btn btn-sm btn-primary" data-check-id="' +
+        t.id + '">CHECK NOW</button>' +
+      '<button type="button" class="t-del" data-del-id="' + t.id + '">remove</button>' +
+    '</span></div>';
+}
+
+function loadTargets() {
+  var list = document.getElementById('targetsList');
+  return apiFetch('/api/social/targets')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data && data.error) throw new Error(String(data.error));
+      TARGETS_CACHE = Array.isArray(data) ? data : [];
+      var count = document.getElementById('targetsCount');
+      if (count) count.textContent = 'Tracked (' + TARGETS_CACHE.length + ')';
+      var stat = document.getElementById('statTargets');
+      if (stat) stat.textContent = TARGETS_CACHE.length;
+      if (!list) return;
+      if (!TARGETS_CACHE.length) {
+        list.innerHTML = '<p class="targets-empty">No targets yet. Add a platform and handle above — ' +
+          'that platform\'s tab then becomes its CHECK AGAIN dashboard.</p>';
+        return;
+      }
+      list.innerHTML = TARGETS_CACHE.map(targetRowHtml).join('');
+    })
+    .catch(function () {
+      if (list) {
+        list.innerHTML = '<p class="targets-empty">Could not load the target store — ' +
+          'is the server running? Reload to try again.</p>';
+      }
+    });
+}
+
+function addTargetFromForm() {
+  var sel = document.getElementById('targetPlatform');
+  var input = document.getElementById('targetHandle');
+  var btn = document.getElementById('targetAddBtn');
+  var platform = sel ? sel.value : '';
+  var handle = input ? input.value.trim() : '';
+  if (!platform) { showToast('Pick a platform first', 'error'); return; }
+  if (!handle) { showToast('Enter a handle', 'error'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+  apiFetch('/api/social/targets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform: platform, handle: handle })
+  }).then(function (r) {
+    return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+  }).then(function (res) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Add Target'; }
+    if (!res.ok) {
+      showToast('Error: ' + ((res.data && res.data.error) || 'could not add target'), 'error');
+      return;
+    }
+    showToast('Now tracking @' + ((res.data && res.data.handle) || handle) +
+              ' on ' + socialLabel(platform), 'success');
+    if (input) input.value = '';
+    loadTargets();
+  }).catch(function (err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Add Target'; }
+    showToast('Error: ' + ((err && err.message) || err), 'error');
+  });
+}
+
+function removeTargetFlow(id, btn) {
+  var t = findTargetById(id);
+  confirmAction({
+    kicker: 'Forget target',
+    title: 'Remove @' + (t ? t.handle : '#' + id) + '?',
+    body: 'Its baseline, snapshots and check history are deleted from the store. ' +
+          'This cannot be undone.',
+    cancelLabel: 'Keep tracking',
+    confirmLabel: 'Remove target'
+  }).then(function (ok) {
+    if (!ok) return;
+    if (btn) btn.disabled = true;
+    apiFetch('/api/social/targets/' + id, { method: 'DELETE' })
+      .then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, data: d }; });
+      })
+      .then(function (res) {
+        if (!res.ok) {
+          if (btn) btn.disabled = false;
+          showToast('Error: ' + ((res.data && res.data.error) || 'remove failed'), 'error');
+          return;
+        }
+        showToast('Removed @' + (t ? t.handle : '#' + id), 'success');
+        loadTargets();
+        if (dashboardTarget && dashboardTarget.id === id) {
+          loadSocialDashboard(dashboardTarget.platform);
+        }
+      })
+      .catch(function (err) {
+        if (btn) btn.disabled = false;
+        showToast('Error: ' + ((err && err.message) || err), 'error');
+      });
+  });
+}
+
+/* Social scan summary removed: its title duplicated the identity band,
+   its counts duplicated the stat cards and its baseline duplicated the
+   status line. The centered capability line (#socialCaps) is the one
+   honest "what this platform returns" note now. */
+function gotoTab(panelId, platform) {
+  var item = document.querySelector('.nav-item[data-panel="' + panelId + '"]' +
+    (platform ? '[data-platform="' + platform + '"]' : ''));
+  if (item && item.click) { item.click(); return true; }
+  return false;
+}
+
+function openTargetsPanel() {
+  if (!gotoTab('targets')) openPanelDirectly('targets');
+}
+
+function openTargetDashboard(id) {
+  var t = findTargetById(id);
+  if (!t) {
+    showToast('That target is no longer tracked — the list will refresh.', 'error');
+    loadTargets();
+    return;
+  }
+  pendingDashboardTarget = id;
+  /* Ride the existing nav wiring: the click activates the panel AND
+     selects the platform, which resolves this dashboard. */
+  if (!gotoTab('social', t.platform)) {
+    openPanelDirectly('social');
+    selectSocialPlatform(t.platform);
+  }
+  checkTarget(t);
+}
+
+/* ── The CHECK AGAIN dashboard ── */
+
+function resolveDashboardTarget(key, explicitId) {
+  if (explicitId) {
+    var picked = findTargetById(explicitId);
+    if (picked && picked.platform === key) return picked;
+  }
+  for (var i = 0; i < TARGETS_CACHE.length; i++) {
+    if (TARGETS_CACHE[i].platform === key) return TARGETS_CACHE[i];
+  }
+  return null;
+}
+
+function loadSocialDashboard(key, explicitId) {
+  var wantId = explicitId || pendingDashboardTarget;
+  pendingDashboardTarget = null;
+  return apiFetch('/api/social/targets')
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data && data.error) throw new Error(String(data.error));
+      TARGETS_CACHE = Array.isArray(data) ? data : [];
+      var target = resolveDashboardTarget(key, wantId);
+      dashboardTarget = target || null;
+      if (!target) {
+        paintDashboardHead(key, null, null);
+        paintDashboardBlank('No target on this tab yet',
+          'Add <b>' + escapeHtml(key) + '</b> once on the ' +
+          '<button type="button" class="btn btn-sm btn-outline" id="gotoTargets">Targets</button> ' +
+          'tab — this tab then tracks it.');
+        return;
+      }
+      return apiFetch('/api/social/targets/' + target.id + '?limit=20')
+        .then(function (r) { return r.json(); })
+        .then(function (detail) {
+          if (detail && detail.error) throw new Error(String(detail.error));
+          paintDashboard(key, target, detail || {});
+        });
+    })
+    .catch(function (err) {
+      dashboardTarget = null;
+      paintDashboardHead(key, null, null);
+      paintDashboardBlank('Could not load the dashboard',
+        escapeHtml(String((err && err.message) || err)) +
+        ' — check the server, then reload. Nothing on this screen is guessed ' +
+        'while the store is unreachable.');
+    });
+}
+
+function paintDashboardHead(key, target, detail) {
+  var name = document.getElementById('socialPlatformName');
+  if (name) name.textContent = socialLabel(key);
+  var subject = document.getElementById('socialHandleTitle');
+  if (subject) subject.textContent = target ? target.handle : 'no target';
+  var btn = document.getElementById('socialCheckBtn');
+  if (btn) btn.disabled = !target;
+  var pill = document.getElementById('socialBurnerPill');
+  var loggedIn = !!(detail && Array.isArray(detail.history) && detail.history[0] &&
+                    detail.history[0].payload && detail.history[0].payload.logged_in);
+  if (pill) pill.hidden = !loggedIn;
+  var when = document.getElementById('socialWhen');
+  if (!when) return;
+  if (!target) {
+    when.hidden = true;
+    return;
+  }
+  /* ONE honest status line. Before a baseline exists, "last check <time>"
+     beside "0 checks" read as a contradiction — the only thing worth
+     saying then is that there is no baseline, plus why if the attempt
+     failed. Red is never spent on the baseline: it belongs to change
+     and severity. */
+  var failed = !!(target.last_status && target.last_status !== 'ok' &&
+                  target.last_status !== 'partial');
+  var parts = [];
+  if (target.checks) {
+    if (target.last_check_at) {
+      parts.push('◷ last check <b>' + escapeHtml(fmtWhen(target.last_check_at)) + '</b>');
+    }
+    if (target.baseline_at) {
+      parts.push('baseline <b>' + escapeHtml(fmtWhen(target.baseline_at)) + '</b>');
+    }
+  } else {
+    parts.push('no baseline yet');
+    if (failed && target.last_status) {
+      parts.push('<span class="status-err">last attempt failed: ' +
+        escapeHtml(String(target.last_status).slice(0, 140)) + '</span>');
+    }
+  }
+  when.hidden = false;
+  when.innerHTML = parts.join(' · ');
+}
+
+function blankStateHtml(title, bodyHtml) {
+  return '<div class="blank-state"><div class="bs-t">' + escapeHtml(title) +
+         '</div>' + bodyHtml + '</div>';
+}
+
+function paintDashboardBlank(title, bodyHtml) {
+  dashboardHasTarget = false;
+  dashboardHistory = [];
+  dashboardIndex = 0;
+  dashboardDetail = null;
+  var stats = document.getElementById('socialStats');
+  var diff = document.getElementById('socialDiff');
+  var media = document.getElementById('socialMedia');
+  var posts = document.getElementById('socialPosts');
+  var rail = document.getElementById('socialHistory');
+  if (stats) { stats.innerHTML = ''; stats.hidden = true; }
+  if (media) media.innerHTML = '';
+  if (posts) posts.innerHTML = '';
+  if (rail) rail.innerHTML = '';
+  if (diff) diff.innerHTML = blankStateHtml(title, bodyHtml);
+  refreshScanMode();
+}
+
+function paintDashboard(key, target, detail) {
+  paintDashboardHead(key, target, detail);
+  dashboardHasTarget = true;
+  dashboardDetail = detail || {};
+  dashboardHistory = Array.isArray(detail.history) ? detail.history : [];
+  dashboardIndex = 0;  // every load opens on the newest check
+  paintDashboardSelection(key, target, detail);
+}
+
+/* The main column follows dashboardIndex. Selecting a past card in the
+   rail only repaints these panes — no refetch, and no client-side diff:
+   each entry carries the verdict the server's diff engine computed. */
+function paintDashboardSelection(key, target, detail) {
+  var history = dashboardHistory;
+  var index = Math.max(0, Math.min(dashboardIndex,
+                                   Math.max(0, history.length - 1)));
+  dashboardIndex = index;
+  var entry = history[index] || null;
+  var verdict;
+  if (entry && entry.diff) {
+    verdict = entry.diff;
+  } else if (index === 0) {
+    verdict = (detail && detail.last_diff) || null;
+  } else {
+    verdict = { ok: false, changed: false,
+                error: 'no comparison was stored for this check' };
+  }
+  var stats = document.getElementById('socialStats');
+  var diff = document.getElementById('socialDiff');
+  var media = document.getElementById('socialMedia');
+  var posts = document.getElementById('socialPosts');
+  var rail = document.getElementById('socialHistory');
+  if (stats) {
+    stats.innerHTML = statCardsHtml(target, history, verdict, index);
+    stats.hidden = !stats.innerHTML;  // no lone "CHECKS 0" box
+  }
+  if (diff) diff.innerHTML = dashDiffHtml(verdict, target, history, index);
+  if (media) media.innerHTML = mediaPanelHtml(target, entry, key);
+  if (posts) posts.innerHTML = newPostsHtml(verdict, target);
+  if (rail) rail.innerHTML = historyRailHtml(target, history, index);
+  refreshScanMode();
+}
+
+/* Which stats have a panel behind them — the same predicate the diff
+   renderer uses, so a chevron never points at nothing. */
+function dashToggles(verdict) {
+  var set = {};
+  if (!verdict || !verdict.ok) return set;
+  Object.keys(verdict.lists || {}).forEach(function (kind) {
+    var e = verdict.lists[kind] || {};
+    if (e.refused || e.added_refused || e.removed_refused ||
+        (e.added && e.added.length) || (e.removed && e.removed.length)) {
+      set[kind] = true;
+    }
+  });
+  if (verdict.posts && verdict.posts.added_count) set.posts = true;
+  if (verdict.fields && verdict.fields.length) set.fields = true;
+  return set;
+}
+
+var COUNT_SPECS = ['follower_count', 'following_count', 'post_count'];
+
+/* Count key → the diff engine's list kind (singular → plural). */
+var COUNT_TOGGLES = {
+  follower_count: 'followers',
+  following_count: 'following',
+  post_count: 'posts'
+};
+
+function statCardsHtml(target, history, verdict, index) {
+  /* No checks yet → no stat row at all. A lone "CHECKS 0 / no baseline"
+     card above a blank state that says the same thing twice was the
+     loudest noise on the unchecked dashboard. */
+  if (!history || !history.length) return '';
+  var at = Math.max(0, Math.min(index || 0, history.length - 1));
+  var latest = history[at] ? history[at].payload : null;
+  var prev = history[at + 1] ? history[at + 1].payload : null;
+  var toggles = dashToggles(verdict);
+  var versus = at === 0 ? 'vs last check' : 'vs previous check';
+  var html = '';
+  COUNT_SPECS.forEach(function (key) {
+    var value = latest ? latest[key] : null;
+    /* Unread is not zero: a count the platform did not report never
+       renders a number, delta or placeholder here. */
+    if (typeof value !== 'number') return;
+    var delta = (prev && typeof prev[key] === 'number') ? value - prev[key] : null;
+    var deltaHtml;
+    if (delta === null) {
+      deltaHtml = '<span class="stat-delta">first check · no delta yet</span>';
+    } else if (delta > 0) {
+      deltaHtml = '<span class="stat-delta up">▲ +' + delta + ' ' + versus + '</span>';
+    } else if (delta < 0) {
+      deltaHtml = '<span class="stat-delta">▼ ' + delta + ' ' + versus + '</span>';
+    } else {
+      deltaHtml = '<span class="stat-delta">· no change ' + versus + '</span>';
+    }
+    var toggleKey = COUNT_TOGGLES[key];
+    var canToggle = !!toggles[toggleKey];
+    html += '<div class="stat-card' + (canToggle ? ' click' : '') + '"' +
+      (canToggle ? ' data-toggle="' + toggleKey + '"' : '') + '>' +
+      '<span class="stat-label">' + escapeHtml(socialFieldLabel(key)) +
+      (canToggle ? '<span class="chev">▾</span>' : '') + '</span>' +
+      '<span class="stat-num">' + value.toLocaleString() + '</span>' +
+      deltaHtml + '</div>';
+  });
+  html += '<div class="stat-card"><span class="stat-label">Checks</span>' +
+    '<span class="stat-num">' + (target.checks || 0) + '</span>' +
+    '<span class="stat-delta">' +
+    (target.baseline_at ? 'baseline ' + escapeHtml(fmtWhen(target.baseline_at))
+                        : 'no baseline yet') +
+    (at > 0 ? ' · showing ' + escapeHtml(fmtWhen(history[at].taken_at)) : '') +
+    '</span></div>';
+  return html;
+}
+
+function listVerb(kind, isAdd) {
+  if (kind === 'followers') return isAdd ? 'new follower' : 'unfollowed';
+  if (kind === 'following') return isAdd ? 'now following' : 'no longer following';
+  return isAdd ? 'added' : 'removed';
+}
+
+function diffRowHtml(name, tag, isNew) {
+  var initials = String(name).replace(/[^a-z0-9]/gi, '').slice(0, 2).toUpperCase() || '??';
+  return '<div class="drow"><span class="dav' + (isNew ? '' : ' out') + '">' +
+    escapeHtml(initials) + '</span><span class="dname">' + escapeHtml(name) +
+    '</span><span class="dtag' + (isNew ? ' red' : '') + '">' +
+    escapeHtml(tag) + '</span></div>';
+}
+
+function listPanelHtml(kind, entry, latestPayload, since) {
+  if (!entry) return '';
+  var added = entry.added || [];
+  var removed = entry.removed || [];
+  var hasChange = !!(added.length || removed.length);
+  var hasRefusal = !!(entry.refused || entry.added_refused || entry.removed_refused);
+  if (!hasChange && !hasRefusal) return '';
+
+  var title = kind.charAt(0).toUpperCase() + kind.slice(1);
+  var head;
+  if (hasChange) {
+    var bits = [];
+    if (added.length) bits.push('+' + added.length + ' new');
+    if (removed.length) bits.push('−' + removed.length + ' ' + listVerb(kind, false));
+    head = bits.join(', ') + (since ? ' since ' + since : '');
+  } else {
+    head = 'no diff claimed';
+  }
+
+  var html = '<div class="diff-panel" data-list="' + escapeHtml(kind) + '"><h3>' +
+    escapeHtml(title) + ' · ' + escapeHtml(head) + '</h3>';
+  if (entry.refused) {
+    html += '<div class="dnote">' + escapeHtml(entry.refused) + '</div>';
+  } else {
+    if (entry.added_refused) {
+      html += '<div class="dnote">' + escapeHtml(entry.added_refused) + '</div>';
+    }
+    if (entry.removed_refused) {
+      html += '<div class="dnote">' + escapeHtml(entry.removed_refused) + '</div>';
+    }
+    if (hasChange) {
+      html += '<div class="drows">';
+      added.slice(0, 60).forEach(function (h) {
+        html += diffRowHtml(h, listVerb(kind, true), true);
+      });
+      removed.slice(0, 60).forEach(function (h) {
+        html += diffRowHtml(h, listVerb(kind, false), false);
+      });
+      html += '</div>';
+    }
+  }
+  /* Completeness frame on every claim: what the collector actually saw. */
+  var list = (latestPayload && latestPayload.lists && latestPayload.lists[kind]) || null;
+  var foot = [];
+  if (hasChange) foot.push(pluralize(added.length + removed.length, 'change'));
+  if (list && list.complete === false) {
+    var seen = list.limit || list.expected ||
+      (Array.isArray(list.handles) ? list.handles.length : null);
+    foot.push('sampled first ' + (seen || '?') +
+      ' — changes below are real, but absence of change here does not prove the list held');
+  }
+  if (foot.length) html += '<div class="dfoot">' + escapeHtml(foot.join(' · ')) + '</div>';
+  return html + '</div>';
+}
+
+function shortVal(v) {
+  if (v === null || v === undefined || v === '') return '—';
+  var s = Array.isArray(v) ? v.join(', ') : String(v);
+  return s.length > 160 ? s.slice(0, 157) + '…' : s;
+}
+
+/* A URL change has to be verifiable by clicking — a truncated display
+   string ending in "…" is not a URL, and pasting it gets rejected.
+   Link-type field values render the full href behind a short
+   host + path label. */
+function linkValHtml(v) {
+  var s = (v === null || v === undefined) ? '' : String(v);
+  if (!/^https?:\/\//i.test(s)) return escapeHtml(shortVal(s));
+  var label = s;
+  try {
+    var u = new URL(s);
+    label = u.hostname.replace(/^www\./, '') + (u.pathname === '/' ? '' : u.pathname);
+    if (u.search) label += '?…';
+  } catch (e) { /* not parseable — fall through to the shortened raw value */ }
+  if (label.length > 72) label = label.slice(0, 69) + '…';
+  return '<a href="' + escapeHtml(s) + '" target="_blank" rel="noopener noreferrer">' +
+    escapeHtml(label) + '</a>';
+}
+
+function dashDiffHtml(verdict, target, history, index) {
+  if (!verdict) {
+    return blankStateHtml('No baseline yet',
+      'The first successful check records it; every later check is described against it.');
+  }
+  var at = Math.max(0, Math.min(index || 0,
+                                Math.max(0, (history || []).length - 1)));
+  /* The oldest retained check is the baseline — including when retention
+     pruned the original first check. A state, not an engine refusal. */
+  if (history && history.length && at === history.length - 1) {
+    return blankStateHtml('Baseline recorded',
+      'The next check is described against it.');
+  }
+  if (!verdict.ok) {
+    /* Baseline wording and refusals come straight from the engine —
+       "could not compare" must never render as "nothing changed". */
+    return '<div class="diff-none">' +
+      escapeHtml(verdict.error || 'could not compare these checks') + '</div>';
+  }
+  var latest = history[at] ? history[at].payload : {};
+  var since = history[at + 1] ? fmtWhen(history[at + 1].taken_at)
+    : (target && target.baseline_at ? fmtWhen(target.baseline_at) : 'the baseline');
+  var html = '';
+  Object.keys(verdict.lists || {}).forEach(function (kind) {
+    html += listPanelHtml(kind, verdict.lists[kind], latest, since);
+  });
+  if (verdict.fields && verdict.fields.length) {
+    html += '<div class="diff-panel" data-list="fields"><h3>Profile fields · ' +
+      pluralize(verdict.fields.length, 'change') + '</h3>';
+    verdict.fields.slice(0, 30).forEach(function (f) {
+      var type = socialFieldType(f.key);
+      var note = (type === 'link' || type === 'image')
+        ? (linkValHtml(f.old) + '<span class="darrow">→</span>' + linkValHtml(f.new))
+        : (escapeHtml(shortVal(f.old)) + ' → ' + escapeHtml(shortVal(f.new)));
+      html += '<div class="drow"><span class="dname">' +
+        escapeHtml(f.label || f.key) + '</span>' +
+        '<span class="dtag red">changed</span></div>' +
+        '<div class="dnote">' + note + '</div>';
+    });
+    html += '</div>';
+  }
+  var walls = verdict.walls || {};
+  var walled = walls.new || [];
+  var resolved = walls.resolved || [];
+  if (walled.length || resolved.length) {
+    html += '<div class="diff-panel" data-list="walls"><h3>List access changed</h3>';
+    walled.forEach(function (w) {
+      html += '<div class="drow"><span class="dname">' +
+        escapeHtml(w.label || w.kind || 'list') + '</span>' +
+        '<span class="dtag red">now walled</span></div>' +
+        '<div class="dnote">' + escapeHtml(w.why || 'refused this check') + '</div>';
+    });
+    resolved.forEach(function (kind) {
+      html += '<div class="drow"><span class="dname">' + escapeHtml(kind) +
+        '</span><span class="dtag">accessible again</span></div>';
+    });
+    html += '</div>';
+  }
+  /* A refused phase renders its reason — "could not compare" must never
+     look like "nothing changed", even when everything else held. */
+  if (verdict.posts && verdict.posts.refused) {
+    html += '<div class="diff-none">' + escapeHtml(verdict.posts.refused) + '</div>';
+  }
+  if (html) return html;
+  var moved = (verdict.counts || []).some(function (c) { return c.delta; });
+  if (moved) {
+    return '<div class="diff-none">Count changes only — see the stat deltas above. ' +
+      'No list, profile or wall changes to report.</div>';
+  }
+  return '<div class="diff-none">No changes since the previous check — ' +
+    'counts held and the lists matched.</div>';
+}
+
+function newPostsHtml(verdict, target) {
+  var added = (verdict && verdict.ok && verdict.posts && verdict.posts.added) || [];
+  if (!added.length) return '';
+  var handle = (target && target.handle) || '';
+  var initial = (handle.charAt(0) || '?').toUpperCase();
+  var html = '<div class="nposts"><h2>New posts (' + added.length + ')</h2>';
+  added.slice(0, 20).forEach(function (post) {
+    var meta = '<b>' + escapeHtml(handle) + '</b>';
+    if (post.timestamp) {
+      meta += '<span>' + escapeHtml(String(post.timestamp).slice(0, 10)) + '</span>';
+    }
+    var href = safeHref(post.url || '');
+    if (href) {
+      meta += '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener">open ↗</a>';
+    }
+    html += '<div class="npost"><div class="np-av">' + escapeHtml(initial) +
+      '</div><div><div class="np-meta">' + meta + '</div>' +
+      '<div class="np-txt">' + escapeHtml(post.caption || '(no caption)') +
+      '</div></div></div>';
+  });
+  if (added.length > 20) {
+    html += '<p class="dim">+ ' + (added.length - 20) + ' more in the run log</p>';
+  }
+  return html + '</div>';
+}
+
+function countLine(payload) {
+  var parts = [];
+  COUNT_SPECS.forEach(function (key) {
+    var v = payload ? payload[key] : null;
+    if (typeof v === 'number') {
+      parts.push(v.toLocaleString() + ' ' + socialFieldLabel(key).toLowerCase());
+    }
+  });
+  return parts.length ? parts.join(' · ') : 'profile recorded';
+}
+
+function countDeltas(oldPayload, newPayload) {
+  var parts = [];
+  COUNT_SPECS.forEach(function (key) {
+    var before = oldPayload ? oldPayload[key] : null;
+    var after = newPayload ? newPayload[key] : null;
+    if (typeof before !== 'number' || typeof after !== 'number') return;
+    var delta = after - before;
+    if (!delta) return;
+    var label = socialFieldLabel(key).toLowerCase();
+    if (delta > 0) parts.push('<span class="chg">+' + delta + ' ' + label + '</span>');
+    else parts.push('−' + Math.abs(delta) + ' ' + label);
+  });
+  return parts;
+}
+
+function fmtUnix(ts) {
+  if (typeof ts !== 'number' || !isFinite(ts)) return '';
+  var d = new Date(ts * 1000);
+  if (isNaN(d.getTime())) return '';
+  return fmtWhen(d.toISOString());
+}
+
+function historyRailHtml(target, history, selectedIndex) {
+  if (!history || !history.length) return '';
+  var at = Math.max(0, Math.min(selectedIndex || 0, history.length - 1));
+  /* Newest first: the card the dashboard opens on is at the top. */
+  var html = '<div class="hist-sect"><h2>History <span class="hist-sub">' +
+    'newest first</span></h2><div class="tl-list">';
+  history.forEach(function (entry, i) {
+    var payload = entry.payload || {};
+    var body;
+    if (i === history.length - 1) {
+      body = '<b>Baseline established</b><br>' + escapeHtml(countLine(payload));
+    } else {
+      var parts = countDeltas(history[i + 1].payload, payload);
+      body = parts.length ? parts.join(' · ')
+        : '<span class="same">no changes · counts held</span>';
+    }
+    if (payload.status === 'partial') {
+      body += '<br><span class="same">partial lists this check</span>';
+    }
+    html += '<button type="button" class="tl-row' + (i === at ? ' active' : '') +
+      '" data-hist-index="' + i + '"' +
+      (i === at ? ' aria-current="true"' : '') + '>' +
+      '<span class="tl-dot" aria-hidden="true"></span>' +
+      '<span class="tl-main"><span class="tl-time">' +
+      escapeHtml(fmtWhen(entry.taken_at)) +
+      (i === 0 ? '<span class="tl-tag">latest</span>' : '') +
+      '</span><span class="tl-body">' + body + '</span></span></button>';
+  });
+  return html + '</div></div>';
+}
+
+/* ── Media for one check ──
+ *
+ * Stories and post files are captured per snapshot, so a timeline card is
+ * also a media date. Three states stay distinct on purpose: undefined
+ * (snapshot predates capture), null (capture attempted and unavailable),
+ * and an empty list (captured; there was nothing).
+ */
+function mediaNoteHtml(text) {
+  return '<p class="media-note">' + escapeHtml(text) + '</p>';
+}
+
+function mediaIsVideo(path) {
+  return /\.(mp4|webm|mov|m4v)$/i.test(String(path || ''));
+}
+
+function mediaUrl(target, path) {
+  return '/api/social/media/' + target.id + '?path=' + encodeURIComponent(path);
+}
+
+function mediaTileHtml(target, path, label) {
+  var video = mediaIsVideo(path);
+  var src = mediaUrl(target, path);
+  var inner = video
+    ? '<span class="mt-play" aria-hidden="true">▶</span><span class="mt-kind">video</span>'
+    : '<img src="' + escapeHtml(src) + '" alt="" loading="lazy" />';
+  return '<button type="button" class="mtile' + (video ? ' video' : '') + '"' +
+    ' data-media-src="' + escapeHtml(src) + '"' +
+    ' data-media-kind="' + (video ? 'video' : 'image') + '"' +
+    ' data-media-caption="' + escapeHtml(label) + '"' +
+    ' title="' + escapeHtml(label) + '">' + inner + '</button>';
+}
+
+function mediaPanelHtml(target, entry, platformKey) {
+  if (!target || !entry) return '';
+  var payload = entry.payload || {};
+  var caps = Array.isArray(payload.capabilities) ? payload.capabilities : [];
+  var capable = platformKey === 'instagram' ||
+    caps.indexOf('media') >= 0 || caps.indexOf('stories') >= 0;
+  if (!capable) return '';
+
+  var stories = payload.stories;
+  var storyItems = (stories && Array.isArray(stories.items)) ? stories.items : [];
+  var storyFiles = storyItems.filter(function (s) { return s && s.file; });
+  var posts = Array.isArray(payload.posts) ? payload.posts : [];
+  var postTiles = [];
+  var postsHaveMediaKey = false;
+  posts.forEach(function (post) {
+    if (!post || typeof post !== 'object') return;
+    if (Object.prototype.hasOwnProperty.call(post, 'media_files')) {
+      postsHaveMediaKey = true;
+    }
+    (post.media_files || []).forEach(function (path) {
+      if (typeof path !== 'string' || !path) return;
+      var label = post.caption ? String(post.caption) : 'Post';
+      if (post.timestamp) label = (fmtUnix(post.timestamp) || '') + ' · ' + label;
+      postTiles.push({ path: path, label: label });
+    });
+  });
+
+  var html = '<div class="media-sect"><div class="media-head"><h2>Media</h2>' +
+    '<span class="media-when">' + escapeHtml(fmtWhen(entry.taken_at)) +
+    '</span></div>';
+
+  html += '<div class="media-group"><h3>Stories</h3>';
+  if (stories === undefined) {
+    html += mediaNoteHtml('Stories were not captured in this check — '
+      + 'this snapshot predates story capture.');
+  } else if (stories === null) {
+    html += mediaNoteHtml('Stories were not captured — they need a burner '
+      + 'login and an active story tray.');
+  } else if (!storyFiles.length) {
+    html += mediaNoteHtml(storyItems.length
+      ? storyItems.length + ' story item(s) seen, none downloaded — '
+        + 'enable Download Media before checking.'
+      : 'No active stories in this check’s 24-hour window.');
+  } else {
+    html += '<div class="media-grid">';
+    storyFiles.slice(0, 60).forEach(function (s) {
+      html += mediaTileHtml(target, s.file,
+        'Story · ' + (fmtUnix(s.taken_at) || 'time unknown'));
+    });
+    html += '</div>';
+    if (storyFiles.length > 60) {
+      html += mediaNoteHtml('+ ' + (storyFiles.length - 60) +
+        ' more story items in this check.');
+    }
+  }
+  html += '</div>';
+
+  html += '<div class="media-group"><h3>Posts</h3>';
+  if (postTiles.length) {
+    html += '<div class="media-grid">';
+    postTiles.slice(0, 60).forEach(function (tile) {
+      html += mediaTileHtml(target, tile.path, tile.label);
+    });
+    html += '</div>';
+    if (postTiles.length > 60) {
+      html += mediaNoteHtml('+ ' + (postTiles.length - 60) +
+        ' more files in this check.');
+    }
+  } else if (!posts.length) {
+    html += mediaNoteHtml('No posts were retrieved in this check.');
+  } else if (!postsHaveMediaKey) {
+    html += mediaNoteHtml('Post media was not linked to posts in this snapshot '
+      + '— it predates per-post media capture.');
+  } else {
+    html += mediaNoteHtml('No post media was downloaded for this check — '
+      + 'enable Download Media and check again.');
+  }
+  return html + '</div></div>';
+}
+
+function openMediaLightbox(src, kind, caption) {
+  var box = document.getElementById('mediaLightbox');
+  var stage = document.getElementById('mediaLightboxStage');
+  var cap = document.getElementById('mediaLightboxCaption');
+  if (!box || !stage) return;
+  stage.innerHTML = '';
+  var node;
+  if (kind === 'video') {
+    node = document.createElement('video');
+    node.src = src;
+    node.controls = true;
+    node.autoplay = true;
+    node.playsInline = true;
+  } else {
+    node = document.createElement('img');
+    node.src = src;
+    node.alt = caption || '';
+  }
+  stage.appendChild(node);
+  if (cap) {
+    cap.textContent = caption || '';
+    cap.hidden = !caption;
+  }
+  box.hidden = false;
+}
+
+function closeMediaLightbox() {
+  var box = document.getElementById('mediaLightbox');
+  var stage = document.getElementById('mediaLightboxStage');
+  if (stage) stage.innerHTML = '';
+  if (box) box.hidden = true;
+}
+
+/* ── Running a check ── */
+
+function buildCheckPayload(platform) {
+  var payload = {};
+  var form = document.getElementById('form-social');
+  if (form && form.querySelectorAll) {
+    var flags = form.querySelectorAll('[data-flag]');
+    for (var i = 0; i < flags.length; i++) {
+      var el = flags[i];
+      if (el.type === 'checkbox') {
+        if (el.checked) payload[el.getAttribute('data-flag')] = '1';
+      } else if (el.value) {
+        payload[el.getAttribute('data-flag')] = el.value;
+      }
+    }
+  }
+  var burner = loadBurnerConfig();
+  var meta = (typeof SOCIAL_META !== 'undefined') && SOCIAL_META ? SOCIAL_META[platform] : null;
+  if (burner && burner.enabled && burner.username &&
+      meta && meta.login && meta.login !== 'none') {
+    payload.burner_enabled = '1';
+    payload.burner_username = String(burner.username);
+    payload.burner_password = String(burner.password || '');
+  }
+  return payload;
+}
+
+/* ── Scan mode ──
+ *
+ * While a check runs, the dashboard body is stale (it describes the
+ * PREVIOUS check) and the options are already on their way to the
+ * server. Showing both under the scan card is how an unchecked target
+ * rendered four stacked boxes saying three versions of "nothing yet".
+ * During a scan: identity band + scan card. Nothing else.
+ * Repaints derive the state from the live scan registry, so a finished,
+ * failed or cancelled check always restores the view. */
+function setScanMode(scanning) {
+  var dash = document.getElementById('socialDash');
+  if (dash) dash.hidden = !!scanning;
+  var opts = document.getElementById('form-social');
+  if (opts) opts.hidden = !!scanning;
+}
+
+function refreshScanMode() {
+  var scanning = !!activeScans['socialResults'];
+  setScanMode(scanning);
+  /* The capability line is "why add this tab" — it speaks before a
+     target exists and stays quiet once the tab is tracking one. */
+  var caps = document.getElementById('socialCaps');
+  if (caps) caps.hidden = scanning || dashboardHasTarget;
+}
+
+function checkTarget(target) {
+  if (!target) {
+    showToast('No tracked target on this tab yet — add one on the Targets tab.', 'error');
+    return;
+  }
+  var btn = document.getElementById('socialCheckBtn');
+  setLoading(btn, true);
+  showScanning('socialResults', socialLabel(target.platform) + ' @' + target.handle,
+               false, 'social');
+  refreshScanMode();
+  runAsyncScan({
+    url: '/api/social/targets/' + target.id + '/check',
+    method: 'POST',
+    body: buildCheckPayload(target.platform),
+    resultsId: 'socialResults',
+    target: target.handle,
+    qtype: 'social',
+    btn: btn,
+    onFail: function () { refreshScanMode(); },
+    onDone: function (result) {
+      if (result && result.error) {
+        showToast('Check failed: ' + result.error, 'error');
+      } else if (result && result.first) {
+        showToast('Baseline recorded for @' + target.handle, 'success');
+      } else {
+        showToast('Check complete', 'success');
+      }
+      /* Repaint whichever tab is actually open — a check finishing while
+         the operator browsed another platform must not repaint that
+         platform's head with this target's numbers. The store now
+         carries the recomputed diff for this check. */
+      var sel = document.getElementById('socialPlatform');
+      var showing = (sel && sel.value) ? sel.value : target.platform;
+      loadSocialDashboard(showing, target.id);
+      loadTargets();
+    }
+  });
+}
+
+/* ── Wiring (script tag sits at the end of body — the DOM exists here) ── */
+(function wireTargetsAndCheckAgain() {
+  var addBtn = document.getElementById('targetAddBtn');
+  if (addBtn) addBtn.addEventListener('click', addTargetFromForm);
+  var handleInput = document.getElementById('targetHandle');
+  if (handleInput) {
+    handleInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); addTargetFromForm(); }
+    });
+  }
+  var list = document.getElementById('targetsList');
+  if (list) {
+    list.addEventListener('click', function (e) {
+      var check = e.target.closest ? e.target.closest('[data-check-id]') : null;
+      if (check) {
+        openTargetDashboard(parseInt(check.getAttribute('data-check-id'), 10));
+        return;
+      }
+      var del = e.target.closest ? e.target.closest('[data-del-id]') : null;
+      if (del) removeTargetFlow(parseInt(del.getAttribute('data-del-id'), 10), del);
+    });
+  }
+  var checkBtn = document.getElementById('socialCheckBtn');
+  if (checkBtn) {
+    checkBtn.addEventListener('click', function () { checkTarget(dashboardTarget); });
+  }
+  /* The form carries only per-check options; Enter must not invent a run
+     against an unselected target. */
+  var form = document.getElementById('form-social');
+  if (form) {
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      checkTarget(dashboardTarget);
+    });
+  }
+  var dash = document.getElementById('socialDash');
+  if (dash) {
+    dash.addEventListener('click', function (e) {
+      if (e.target && e.target.id === 'gotoTargets') { openTargetsPanel(); return; }
+      /* Timeline card: rewind the main column to that check. */
+      var histRow = e.target.closest ? e.target.closest('[data-hist-index]') : null;
+      if (histRow) {
+        var idx = parseInt(histRow.getAttribute('data-hist-index'), 10);
+        if (!isNaN(idx) && dashboardTarget) {
+          dashboardIndex = idx;
+          var sel = document.getElementById('socialPlatform');
+          paintDashboardSelection((sel && sel.value) || dashboardTarget.platform,
+                                  dashboardTarget, dashboardDetail || {});
+        }
+        return;
+      }
+      /* Media tile: open the viewer. */
+      var tile = e.target.closest ? e.target.closest('[data-media-src]') : null;
+      if (tile) {
+        openMediaLightbox(tile.getAttribute('data-media-src'),
+                          tile.getAttribute('data-media-kind'),
+                          tile.getAttribute('data-media-caption'));
+        return;
+      }
+      var toggle = e.target.closest ? e.target.closest('[data-toggle]') : null;
+      if (!toggle) return;
+      var key = toggle.getAttribute('data-toggle');
+      if (key === 'posts') {
+        var posts = document.getElementById('socialPosts');
+        if (posts) posts.style.display = posts.style.display === 'none' ? '' : 'none';
+        return;
+      }
+      var panel = document.querySelector('#socialDiff [data-list="' + key + '"]');
+      if (panel) panel.style.display = panel.style.display === 'none' ? '' : 'none';
+    });
+  }
+  var lightbox = document.getElementById('mediaLightbox');
+  if (lightbox) {
+    lightbox.addEventListener('click', function (e) {
+      if (e.target === lightbox) closeMediaLightbox();
+    });
+  }
+  var lightboxClose = document.getElementById('mediaLightboxClose');
+  if (lightboxClose) lightboxClose.addEventListener('click', closeMediaLightbox);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeMediaLightbox();
+  });
+  ['settingsBurnerEnabled', 'settingsBurnerUser', 'settingsBurnerPass'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('change', saveBurnerSettings);
+  });
+})();
+
+/* Preload so the Overview's "Tracked targets" tile is a number, not a
+   dash, the moment the dashboard opens. */
+loadTargets();

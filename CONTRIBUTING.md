@@ -88,9 +88,9 @@ bug once.
 
 ## The vendored engines
 
-`spyglass_pro/modules/` holds three engines — `spyglass_osint`, `instacloak`,
-`lens_extender` — folded in from standalone projects. They sit behind a
-directory boundary on purpose:
+`spyglass_pro/modules/` holds three packages — `spyglass_osint`,
+`instacloak` and `lens_extender` — folded in from standalone projects. They
+sit behind a directory boundary on purpose:
 
 - **Do not refactor them into the merge layer.** They are kept whole so the next
   sync from upstream is mechanical.
@@ -101,19 +101,23 @@ directory boundary on purpose:
   under "Merge provenance" — check before re-syncing, or you will revert a bug
   fix.
 
-### Dormant engines
+### Removed engines
 
-`lens_extender` and `spyglass_osint.ip` are **dormant**: the code is vendored
-here because a sibling tool consumes it, but neither has a product surface in
-this build — no dashboard panel, no endpoint, no query type.
+`spyglass_osint.ip`, the heavy website phases and the Lens-Extender engine
+are **deleted**, not disabled: no flag, env var or config path brings any of
+it back, and a test fails if a removed file, function or endpoint reappears.
+The only survivor is `lens_extender.store` — the SQLite handle the merge
+layer uses to list and delete runs written by an older build. It collects
+nothing and must never grow a scan writer or a recon function.
+
 `spyglass_pro/scope.py` is the list of what is exposed, and the HTTP boundary
-enforces it (anything neither exposed nor explicitly dormant is refused, and
-a test pins the handler map to those two sets).
+enforces it (anything outside that list is refused, and a test pins the
+handler map to it).
 
-Do not add UI, an endpoint or a dispatch entry for a dormant engine. Changing
-the scope list is a product decision, not a refactor — and the rule that keeps
-it honest is the one above: if a new handler appears in the runner without a
-scope decision, the suite fails.
+Do not add UI, an endpoint or a dispatch entry for anything outside the
+scope list. Changing the scope list is a product decision, not a refactor —
+and the rule that keeps it honest is the one above: if a new handler appears
+in the runner without a scope decision, the suite fails.
 
 ## House style
 

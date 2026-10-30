@@ -205,16 +205,15 @@ class RunnerInputTest(unittest.TestCase):
         self.assertIn("at least one", r["error"])
 
     def test_optional_instagram_leg_runs_when_supplied(self):
-        """The Instagram leg still runs; the IP/Lens leg is dormant in 1.3
-        even when an `ip` key is present in the payload."""
+        """The Instagram leg runs; the deleted IP/Lens engines have no
+        dispatch left, even when an `ip` key is present in the payload."""
         from spyglass_pro import runner
+        self.assertFalse(hasattr(runner, "run_lens"))
         with mock.patch.object(inv, "investigate",
                                return_value={"entities": {}, "correlations": []}), \
-             mock.patch.object(runner, "run_lens", return_value={"ok": "lens"}) as lens, \
              mock.patch.object(runner, "run_social", return_value={"ok": "insta"}) as social:
             r = runner.run_investigate({"website": "example.com",
                                         "ip": "8.8.8.8", "insta": "instagram"})
-        lens.assert_not_called()
         # The Instagram leg now shares the one social code path.
         self.assertEqual(social.call_args[0][:2], ("instagram", "instagram"))
         self.assertNotIn("ip_recon", r)

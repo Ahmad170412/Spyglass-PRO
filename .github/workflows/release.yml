@@ -1,7 +1,7 @@
 name: Release
 
 # Cut a release by pushing a version tag, e.g.:
-#   git tag -a v1.5.0 -m "Spyglass-Pro 1.5.0" && git push origin v1.5.0
+#   git tag -a v1.6.0 -m "Spyglass-Pro 1.6.0" && git push origin v1.6.0
 # The tag must match spyglass_pro/version.py / pyproject.toml (test_version.py
 # pins those two together; keep the tag in step with them by hand).
 on:

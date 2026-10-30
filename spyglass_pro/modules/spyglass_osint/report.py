@@ -210,31 +210,6 @@ def _render_website(r: dict) -> list[str]:
     return lines
 
 
-def _render_ip(r: dict) -> list[str]:
-    lines = []
-    if "error" in r:
-        return [f"> {r['error']}", ""]
-    geo = r.get("geo", {})
-    if geo:
-        lines += _kv_section("Geolocation", geo)
-    dns = {}
-    if r.get("ip"):
-        dns["IP"] = r["ip"]
-    if r.get("hostname"):
-        dns["Hostname"] = r["hostname"]
-    if r.get("a_records"):
-        dns["A records"] = ", ".join(r["a_records"])
-    if dns:
-        lines += _kv_section("DNS", dns)
-    whois = r.get("whois", {})
-    if whois:
-        lines += _kv_section("WHOIS", whois)
-    shodan = r.get("shodan", {})
-    if shodan:
-        lines += _kv_section("Shodan", shodan)
-    return lines
-
-
 def _render_metadata(r: dict) -> list[str]:
     lines = []
     if "error" in r:
@@ -561,7 +536,6 @@ def render(result, qtype: str, target: str) -> str:
         "username": _render_username,
         "phone": _render_phone,
         "website": _render_website,
-        "ip": _render_ip,
         "metadata": _render_metadata,
         "opsec": _render_opsec,
         "darkweb": _render_darkweb,

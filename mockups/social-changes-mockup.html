@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mockup — Spyglass-Pro full app (GREENWICH style)</title>
+<!-- GREENWICH styles.css inlined verbatim (single-file preview).
+     Source of truth: GREENWICH/greenwich/styles.css -->
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#000000;
+  --panel:#0A0A0A;
+  --raise:#141414;
+  --line:#1E1E1E;
+  --fg:#FFFFFF;
+  --fg2:#8C8C8C;
+  --fg3:#4A4A4A;
+  --red:#E61919;
+}
+body{
+  background:var(--bg);
+  color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Helvetica,Arial,sans-serif;
+  font-size:14px;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+.app{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
+
+/* ── sidepanel ── */
+.side{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+.brand{padding:26px 22px 22px;font-weight:700;font-size:15px;letter-spacing:.16em}
+.brand i{color:var(--red);font-style:normal}
+.nav{padding:0 0 12px}
+.nav a{
+  display:flex;align-items:center;gap:11px;
+  padding:11px 22px;color:var(--fg2);text-decoration:none;
+  font-size:13px;font-weight:500;letter-spacing:.02em;
+  border-left:2px solid transparent;
+}
+.nav a:hover{color:var(--fg);background:var(--raise)}
+.nav a.on{color:var(--fg);border-left-color:var(--red);background:var(--raise)}
+.nav .sq{width:6px;height:6px;background:var(--fg3);flex:none}
+.nav a.on .sq{background:var(--red)}
+/* ── main ── */
+.main{padding:38px 40px 80px;max-width:1320px;width:100%;min-width:0;justify-self:center}
+.page-h{display:flex;align-items:baseline;gap:16px;padding-bottom:22px;margin-bottom:30px;border-bottom:1px solid var(--line)}
+.page-h h1{font-size:24px;font-weight:700;letter-spacing:.02em}
+.page-h .sub{color:var(--fg2);font-size:13px}
+.page-h .right{margin-left:auto;color:var(--fg3);font-size:12px}
+/* tool pages carry their title in the timebar, so only the handle is left */
+.page-h.slim{justify-content:center;padding-bottom:18px;margin-bottom:26px;align-items:center;gap:12px}
+
+.sect{margin-bottom:44px}
+.sect>h2{
+  font-size:11px;font-weight:700;letter-spacing:.16em;color:var(--fg2);
+  text-transform:uppercase;margin-bottom:16px;
+}
+
+/* settings: numbered section heads so the page can be scanned, not read */
+.sect.s{border-top:1px solid var(--line);padding-top:34px;margin-bottom:40px}
+/* Same redundancy on Settings: `.page-h` already draws the rule, so the
+   first numbered section repeated it 30px lower. `:first-of-type` never
+   matched — it counts element TYPE, and `.page-h` is the first <div>, not
+   `.sect.s` — so this line had been dead since it was written. Anchor to
+   the header instead. */
+.page-h+.sect.s{border-top:0;padding-top:8px}
+.sect.s>h2{
+  display:flex;align-items:baseline;gap:13px;
+  font-size:17px;font-weight:700;letter-spacing:.09em;color:var(--fg);
+  margin-bottom:20px;
+}
+.sect.s>h2 i{
+  font-style:normal;font-size:11px;font-weight:700;letter-spacing:.08em;
+  color:var(--fg3);font-variant-numeric:tabular-nums;
+}
+.muted{color:var(--fg3);font-size:12.5px;margin-top:14px;line-height:1.5}
+
+/* operator writing: notes log + profile form */
+.memo{display:flex;gap:18px;align-items:flex-start;padding:15px 0;border-bottom:1px solid var(--line)}
+.memo .t{flex:none;width:118px;color:var(--fg3);font-size:11.5px;letter-spacing:.05em;
+  font-variant-numeric:tabular-nums;padding-top:2px}
+.memo .b{flex:1;font-size:13.5px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.memo .x{flex:none;color:var(--fg3);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  cursor:pointer;background:none;border:0;font-family:inherit;padding:2px 0}
+.memo .x:hover{color:var(--red)}
+.pf{margin-bottom:22px}
+.pf label{display:block;color:var(--fg2);font-size:11px;font-weight:700;letter-spacing:.13em;
+  text-transform:uppercase;margin-bottom:9px}
+.pf input,.pf textarea{width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--line);
+  color:var(--fg);padding:10px 12px;font:inherit;font-size:13.5px;outline:none}
+.pf textarea{min-height:92px;resize:vertical;line-height:1.6}
+.pf input:focus,.pf textarea:focus{border-color:var(--fg3)}
+.pf ::placeholder{color:var(--fg3)}
+
+/* ── stat blocks ── */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
+/* A 686M follower count needs ~211px of type, but a stat tile is only ~113px
+   wide at a 700px viewport. Truncating the headline number is not an option,
+   so the long one gets two columns instead of every tile shrinking. */
+.stats .stat.wide{grid-column:span 2}
+
+/* Identity band — the standard subject header for EVERY module: the
+   subject's picture with their @handle beside it. The picture was a 32px
+   stamp (and the handle a bare line of text at the top of the page); at
+   168px, next to the handle it reads as who you are looking at. Only
+   Instagram adds a second cell (its story tray); everything else is a
+   single full-width identity cell. Hairline border only — red stays
+   reserved for severity. */
+.ig-band{display:grid;grid-template-columns:1.05fr 1fr;gap:1px;background:var(--line);
+  border:1px solid var(--line);margin:0 0 44px}
+.ig-band.solo{grid-template-columns:1fr}
+.ig-id{background:var(--bg);padding:26px;display:flex;gap:22px;align-items:flex-start;min-width:0}
+.ig-av{width:168px;height:168px;flex:none;border-radius:50%;object-fit:cover;
+  border:1px solid var(--line);background:var(--raise)}
+.ig-idtxt{padding-top:3px;min-width:0}
+.ig-nm{font-size:19px;font-weight:700;line-height:1.3}
+.ig-handle{color:var(--fg2);font-size:14px;margin-top:6px}
+.ig-bio{color:var(--fg2);font-size:13px;line-height:1.6;margin-top:12px;
+  overflow-wrap:anywhere;max-width:46ch}
+.ig-story{background:var(--bg);padding:26px;min-width:0;display:flex;flex-direction:column}
+.ig-story>h2{font-size:11px;font-weight:700;letter-spacing:.16em;color:var(--fg2);
+  text-transform:uppercase;margin-bottom:16px}
+/* the empty-state rules would draw hairlines inside an already-bordered cell */
+.ig-story .empty{border:0;padding:0}
+@media(max-width:760px){.ig-band{grid-template-columns:1fr}}
+.stat{background:var(--bg);padding:22px 24px}
+.stat .k{color:var(--fg2);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+.stat .v{font-size:34px;font-weight:700;letter-spacing:-.02em;margin-top:10px;font-variant-numeric:tabular-nums}
+.stat .d{color:var(--fg3);font-size:12px;margin-top:6px}
+.stat .d.up{color:var(--red)}
+
+/* ── media ── */
+.thumb{
+  width:96px;height:96px;background:var(--raise);position:relative;cursor:pointer;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+}
+.thumb.lg{width:150px;height:150px}
+.thumb:hover::after{
+  content:'▶';position:absolute;color:var(--fg);font-size:15px;
+  background:rgba(0,0,0,.72);width:100%;height:100%;display:flex;align-items:center;justify-content:center;
+}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.story{width:76px;height:76px;border-radius:50%;background:var(--raise);padding:3px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.story.new{outline:2px solid var(--red);outline-offset:2px}
+.story>span{width:100%;height:100%;border-radius:50%;background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:var(--fg2)}
+
+/* ── text feed ── */
+.feed{border-top:1px solid var(--line)}
+.post{padding:20px 0;border-bottom:1px solid var(--line);display:flex;gap:16px}
+.av{width:38px;height:38px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;background:var(--raise)}
+.post .body{min-width:0;flex:1}
+.post .meta{display:flex;gap:10px;align-items:center;font-size:12px;color:var(--fg3);margin-bottom:6px}
+.post .meta b{color:var(--fg2);font-weight:600}
+.post .txt{font-size:14px;line-height:1.55;overflow-wrap:anywhere}
+
+/* ── lists (repos, accounts) ── */
+.rows{border-top:1px solid var(--line)}
+.rowi{display:flex;align-items:center;gap:16px;padding:16px 0;border-bottom:1px solid var(--line)}
+.rowi .n{min-width:0;flex:1;overflow-wrap:anywhere}
+.rowi .n b{font-weight:600;font-size:14px;display:block}
+.rowi .n span{color:var(--fg2);font-size:12.5px}
+.rowi .r{color:var(--fg2);font-size:12.5px;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.rowi .r.red{color:var(--red)}
+.pill{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;background:var(--raise);color:var(--fg2);flex:none}
+.pill.red{background:var(--red);color:#fff}
+
+/* ── expandable affordance ── */
+.click{cursor:pointer}
+.chev{color:var(--fg3);font-size:11px;margin-left:6px}
+.rowi.click:hover{background:var(--raise)}
+.stat.click:hover{background:var(--raise)}
+.stat.click .k{color:var(--fg)}
+
+/* ── delta drill-down panel ── */
+.panel{border:1px solid var(--line);border-top:2px solid var(--red);background:var(--panel);margin-top:1px}
+.panel h3{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:15px 20px 0;color:var(--fg)}
+.panel-f{padding:12px 20px;color:var(--fg3);font-size:11.5px;border-top:1px solid var(--line);margin-top:4px}
+.prows{padding:8px 0}
+.prow{display:flex;align-items:center;gap:12px;padding:8px 20px;font-size:13px}
+.prow:hover{background:var(--raise)}
+.pa{width:26px;height:26px;flex:none;background:var(--raise);display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:var(--fg2)}
+.pn{font-weight:500}
+.pt{margin-left:auto;color:var(--fg3);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ── repo sub-panel ── */
+.sub-panel{border-left:2px solid var(--red);background:var(--panel);padding:16px 20px 18px;margin-bottom:1px}
+.kv{display:flex;gap:16px;padding:5px 0;font-size:13px}
+.kv>span:first-child{width:132px;flex:none;color:var(--fg3);font-size:12px}
+.kv a{color:var(--fg);text-decoration:underline;text-underline-offset:3px}
+.kv.col{display:block;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.kv.col>span:first-child{display:block;margin-bottom:9px}
+.commit{display:flex;gap:12px;align-items:baseline;padding:5px 0;font-size:13px;color:var(--fg2)}
+.commit code{background:var(--raise);padding:2px 6px;font-size:11.5px;color:var(--fg3);flex:none}
+.commit span{margin-left:auto;color:var(--fg3);font-size:11.5px;white-space:nowrap}
+.file{padding:4px 0 4px 14px;font-size:13px;color:var(--fg2);border-left:1px solid var(--line);margin-left:4px}
+
+/* ── story ── */
+.storywrap{display:flex;align-items:center;gap:18px}
+.pill.dot::before{content:'●';margin-right:6px;color:var(--fg3)}
+.pill.dot.live::before{color:var(--red)}
+
+/* ── general / notes / settings forms ── */
+.field{display:flex;align-items:center;gap:20px;padding:16px 0;border-bottom:1px solid var(--line)}
+.field label{width:190px;flex:none;color:var(--fg2);font-size:13px}
+.field .v{flex:1;font-size:14px;min-width:0}
+.field .v.empty{color:var(--fg3)}
+.field input{
+  flex:1;background:var(--bg);border:1px solid var(--line);color:var(--fg);
+  padding:9px 11px;font:inherit;font-size:13px;outline:none;min-width:0;
+}
+.field input:focus{border-color:var(--fg3)}
+textarea{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--fg);padding:12px;font:inherit;font-size:13.5px;min-height:96px;resize:vertical;outline:none}
+textarea:focus{border-color:var(--fg3)}
+/* centred: the add-target control is a form, not a list row */
+.addbar{display:flex;gap:8px;margin-top:12px;justify-content:center}
+.center{text-align:center}
+
+/* ── poll / as-of bar ── */
+.timebar{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:1fr auto 1fr;
+  align-items:center;gap:14px;padding:11px 0;margin-bottom:0;background:var(--bg);
+  border-bottom:1px solid var(--line)}
+/* The step under the header. The timebar's rule is full-bleed (it spans the
+   whole main column) while the first block below it is only 940px wide, so
+   the two hairlines never lined up: a wide rule, 6px of black, then a
+   narrower one — which reads as a ledge, not a divider. One rule now does
+   the job. The timebar keeps its own because it is sticky and opaque, so
+   scrolled content needs something to disappear behind; the first block in
+   the column hangs off that rule instead of drawing a second one. Only the
+   FIRST block: later sections need their rules to stay separate. */
+.timebar+.center-col>.sect:first-child>:first-child{border-top:0}
+.tb-center{grid-column:2;justify-self:center;display:flex;align-items:center;gap:28px}
+.tb-right{grid-column:3;justify-self:end;display:flex;align-items:center;gap:14px}
+.tb-title{margin:0;font-size:24px;font-weight:700;letter-spacing:.02em;white-space:nowrap}
+.tb-btn{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg2);
+  border:1px solid var(--line);padding:7px 13px}
+.tb-btn b{color:var(--fg);font-weight:600}
+.tb-btn:hover{border-color:var(--fg3)}
+.tb-back{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg3);cursor:pointer}
+.tb-back:hover{color:var(--fg)}
+.tb-now{margin-left:auto;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);
+  white-space:nowrap}
+.tb-now b{color:var(--fg);font-weight:600;font-variant-numeric:tabular-nums}
+/* viewing a past check must never read as live data */
+.tb-now.past,.tb-now.past b{color:var(--red)}
+
+.empty{color:var(--fg3);font-size:13px;padding:26px 2px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+
+.tb-check{background:var(--red);color:#fff;font-size:11px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;padding:8px 16px;border:0;cursor:pointer}
+.tb-check:hover{filter:brightness(1.15)}
+.tb-check.busy{background:var(--fg2);cursor:progress}
+/* Same in-flight signal for the Settings buttons: a target add validates by
+   launching a real browser, which is ~14s and used to look like a dead click. */
+.pill.busy{opacity:.7;cursor:progress}
+.tb-none{color:var(--fg3);font-size:12px}
+
+
+.blank{border:1px solid var(--line);border-left:2px solid var(--red);padding:34px 30px;color:var(--fg3);font-size:13.5px;line-height:1.6}
+.blank-t{font-size:11px;font-weight:700;letter-spacing:.14em;color:var(--fg2);margin-bottom:10px}
+.blank b{color:var(--fg2);font-weight:600}
+
+
+.inp{background:var(--bg);border:1px solid var(--line);color:var(--fg);padding:9px 11px;
+  font:inherit;font-size:13px;outline:none}
+.inp:focus{border-color:var(--fg3)}
+select.inp{cursor:pointer}
+.del{color:var(--fg3);font-size:12px;padding:6px 10px;cursor:pointer}
+.del:hover{color:var(--red)}
+.warn{color:var(--red)}
+
+
+/* these are the only way out to the source — they must not hide in the text */
+.pl{color:#fff;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;
+  text-decoration-color:var(--fg3);font-weight:600;transition:text-decoration-color .12s}
+.pl:hover{text-decoration-color:#fff}
+.ext{margin-left:auto;display:inline-flex;align-items:center;gap:5px;color:var(--fg);text-decoration:none;
+  font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;
+  border:1px solid var(--fg3);padding:4px 9px;transition:border-color .12s,background .12s}
+.ext:hover{border-color:var(--fg);color:#fff;background:var(--raise)}
+
+
+.center-col{max-width:940px;margin:0 auto}
+
+
+/* ── horizontal timeline ── */
+.note-add{display:flex;gap:8px;margin-bottom:26px;max-width:900px}
+.tlscroll{overflow-x:auto;padding-bottom:16px;overflow-y:hidden}
+.tltrack{display:flex;align-items:stretch;min-width:min-content;padding-top:4px}
+.tlcard{width:250px;flex:none;position:relative;padding:0 16px;display:flex;flex-direction:column}
+.tld{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--fg3);
+  text-align:center;margin-bottom:12px;font-variant-numeric:tabular-nums}
+.tlnode{position:relative;height:11px;flex:none}
+.tlnode::before{content:'';position:absolute;left:0;right:-16px;top:5px;height:1px;background:var(--line)}
+.tlnode::after{content:'';position:absolute;left:calc(50% - 4px);top:2px;width:7px;height:7px;
+  background:var(--red);border-radius:50%}
+.tlb{margin-top:14px;border:1px solid var(--line);padding:15px;font-size:13.5px;line-height:1.55;
+  color:var(--fg2);background:var(--panel);min-height:74px;overflow-wrap:anywhere}
+.tlx{position:absolute;top:-2px;right:0;font-size:11px;color:var(--fg3);cursor:pointer;padding:2px 4px}
+.tlx:hover{color:var(--red)}
+.pa.out{color:var(--fg3);border:1px dashed var(--fg3)}
+.partial{padding:12px 20px;color:var(--fg2);font-size:12px;line-height:1.5;
+  border-bottom:1px solid var(--line)}
+.withheld .withheld-txt{padding:18px 20px 22px;color:var(--fg3);font-size:13px;line-height:1.6;max-width:640px}
+
+/* ── lightbox ── */
+.lb{position:fixed;inset:0;background:#000;z-index:50;display:none;align-items:center;justify-content:center}
+.lb.on{display:flex}
+.lb .frame{width:min(760px,86vw);height:min(560px,78vh);background:var(--raise);position:relative;display:flex;align-items:center;justify-content:center}
+.lb .cap{padding:16px 4px 0;color:var(--fg2);font-size:13px;display:flex;gap:12px;align-items:center}
+.lb .ctrl{position:absolute;top:50%;transform:translateY(-50%);width:52px;height:76px;background:rgba(255,255,255,.06);color:var(--fg);font-size:19px}
+.lb .ctrl:hover{background:var(--red)}
+.lb-wrap{position:relative}
+.lb .close{position:absolute;top:-40px;right:0;font-size:13px;color:var(--fg2)}
+.lb .close:hover{color:var(--fg)}
+.lb .prog{position:absolute;top:0;left:0;height:3px;width:0;background:var(--red)}
+.lb .idx{color:var(--fg3);font-size:12px}
+
+@media(max-width:900px){.app{grid-template-columns:170px 1fr}.main{padding:26px 22px 60px}.tb-center{gap:14px}.tb-right{flex-wrap:wrap;justify-content:flex-end}}
+
+</style>
+<style>
+/* ── Mockup-only additions (palette-consistent) ─────────────────────── */
+input[type="checkbox"] { accent-color: var(--red); width: 15px; height: 15px; vertical-align: -2px; }
+/* full-app layout: centered controls, clearer headers, more air */
+.page-h { justify-content: center; }
+.page-h + .sect.s { padding-top: 26px; }
+.run-col { max-width: 640px; margin: 0 auto; }
+.form-actions { justify-content: center; margin-top: 24px; }
+.checks { display: flex; gap: 22px; justify-content: center; margin-top: 16px;
+  font-size: 13px; color: var(--fg2); }
+.checks label { cursor: pointer; }
+.sect, .sect.s { margin-bottom: 62px; }
+.sect > h2 { color: var(--fg); font-size: 13px; letter-spacing: .13em; margin-bottom: 22px; }
+.center-col { max-width: 1000px; }
+.timebar { display: flex; justify-content: center; align-items: center; gap: 26px;
+  flex-wrap: wrap; padding: 16px 0; }
+.timebar .tb-now { margin-left: 0; }
+.page { display: none; }
+.page.on { display: block; }
+/* tool pages (Metadata, Email, Username): the form is a hero — centered
+   on the actual screen and sized to be the obvious focal point */
+.page.tool.on {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  /* main's top pad (38) + H/2 lands the group on the true screen midpoint */
+  min-height: calc(100vh - 76px);
+  /* cancel main's 80px bottom pad so the midpoint math adds up without a scrollbar */
+  margin-bottom: -42px;
+}
+.page.tool .sect { margin-bottom: 0; }
+.page.tool .page-h { margin-bottom: 44px; }
+.page.tool .page-h h1 { font-size: 32px; }
+.page.tool .run-col { max-width: 720px; }
+.page.tool .pf { margin-bottom: 30px; }
+.page.tool .pf label { font-size: 12px; margin-bottom: 13px; }
+.page.tool .pf input { font-size: 16px; padding: 15px 17px; }
+.page.tool .checks { font-size: 14px; margin-top: 22px; gap: 28px; }
+.page.tool .form-actions { margin-top: 30px; }
+.page.tool .tb-check { font-size: 12.5px; padding: 14px 34px; letter-spacing: .13em; }
+/* spacing pass — nothing should read as cramped */
+.stat .v { margin-top: 12px; }
+.stat .d { margin-top: 9px; }
+.panel h3 { margin-bottom: 10px; }
+.prows { padding: 10px 0; }
+.prow { padding: 10px 20px; }
+.panel-f { padding: 14px 20px; margin-top: 10px; }
+.post { padding: 22px 0; }
+.post .meta { margin-bottom: 9px; }
+.rowi { padding: 18px 0; }
+.rowi .n span { display: block; margin-top: 5px; }
+.tlcard .tld { margin-bottom: 14px; }
+.tlb { margin-top: 16px; padding: 16px; }
+.side { overflow-y: auto; }
+.nav-group { padding: 18px 22px 6px; font-size: 10px; font-weight: 700;
+  letter-spacing: .16em; color: var(--fg3); text-transform: uppercase; }
+.rowi .act { display: flex; gap: 10px; align-items: center; margin-left: 16px; flex: none; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Side ── -->
+  <aside class="side">
+    <div class="brand">SPYGLASS-<i>PRO</i></div>
+    <nav class="nav">
+      <div class="nav-group">Home</div>
+      <a href="#" data-page="overview"><span class="sq"></span>Overview</a>
+
+      <div class="nav-group">Identity</div>
+      <a href="#" data-page="email"><span class="sq"></span>Email</a>
+      <a href="#" data-page="username"><span class="sq"></span>Username</a>
+      <a href="#" data-page="phone"><span class="sq"></span>Phone</a>
+      <a href="#" data-page="instagram"><span class="sq"></span>Instagram</a>
+      <a href="#" data-page="mastodon"><span class="sq"></span>Mastodon</a>
+      <a href="#" data-page="bluesky"><span class="sq"></span>Bluesky</a>
+      <a href="#" data-page="github"><span class="sq"></span>GitHub</a>
+      <a href="#" data-page="gitlab"><span class="sq"></span>GitLab</a>
+      <a href="#" data-page="keybase"><span class="sq"></span>Keybase</a>
+      <a href="#" data-page="darkweb"><span class="sq"></span>Dark Web</a>
+      <a href="#" data-page="website"><span class="sq"></span>Website</a>
+
+      <div class="nav-group">Investigation</div>
+      <a href="#" data-page="investigate"><span class="sq"></span>Full Investigation</a>
+
+      <div class="nav-group">Utilities</div>
+      <a href="#" data-page="metadata"><span class="sq"></span>Metadata</a>
+      <a href="#" data-page="opsec"><span class="sq"></span>OPSEC Check</a>
+      <a href="#" class="on" data-page="targets"><span class="sq"></span>Targets</a>
+      <a href="#" data-page="settings"><span class="sq"></span>Settings</a>
+
+      <div class="nav-group">Cases</div>
+      <a href="#" data-page="cases"><span class="sq"></span>Stored Cases</a>
+    </nav>
+  </aside>
+
+  <!-- ── Main ── -->
+  <main class="main">
+
+    <!-- ══ Overview ══ -->
+    <section class="page" data-page="overview">
+      <div class="page-h"><h1>Overview</h1></div>
+      <div class="sect">
+        <div class="stats">
+          <div class="stat"><div class="k">Tracked targets</div><div class="v">5</div><div class="d">across 5 platforms</div></div>
+          <div class="stat"><div class="k">Checks today</div><div class="v">6</div><div class="d">1 awaiting first check</div></div>
+          <div class="stat"><div class="k">Changes today</div><div class="v">17</div><div class="d up">▲ across all targets</div></div>
+          <div class="stat"><div class="k">Stored cases</div><div class="v">0</div><div class="d">opt-in only</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Targets (new) ══ -->
+    <section class="page on" data-page="targets">
+      <div class="page-h"><h1>Targets</h1></div>
+
+      <div class="sect s">
+        <h2><i>01</i>Add a target</h2>
+        <div class="addbar">
+          <select class="inp">
+            <option>Bluesky</option><option>Mastodon</option><option>Instagram</option>
+            <option>GitHub</option><option>GitLab</option><option>Keybase</option>
+          </select>
+          <input class="inp" type="text" placeholder="handle" style="min-width:260px;" />
+          <button class="tb-check">ADD TARGET</button>
+        </div>
+      </div>
+
+      <div class="sect s">
+        <h2><i>02</i>Tracked (5)</h2>
+        <div class="rows">
+          <div class="rowi">
+            <div class="n"><b>dawn.example.bsky.social</b><span>bluesky · baseline 24 Oct · 14:09</span></div>
+            <span class="r">5 checks · last 08:29</span>
+            <span class="act"><button class="tb-btn">CHECK NOW</button><button class="del">remove</button></span>
+          </div>
+          <div class="rowi">
+            <div class="n"><b>dawn@social.example</b><span>mastodon · baseline 27 Oct · 11:30</span></div>
+            <span class="r">2 checks · last 08:31</span>
+            <span class="act"><button class="tb-btn">CHECK NOW</button><button class="del">remove</button></span>
+          </div>
+          <div class="rowi">
+            <div class="n"><b>dawn.shoots <span class="pill">BURNER</span></b><span>instagram · baseline 27 Oct · 22:15</span></div>
+            <span class="r">3 checks · last 08:35</span>
+            <span class="act"><button class="tb-btn">CHECK NOW</button><button class="del">remove</button></span>
+          </div>
+          <div class="rowi">
+            <div class="n"><b>ahmad-dev</b><span>github · baseline 20 Oct · 17:02</span></div>
+            <span class="r">10 checks · last 08:33</span>
+            <span class="act"><button class="tb-btn">CHECK NOW</button><button class="del">remove</button></span>
+          </div>
+          <div class="rowi">
+            <div class="n"><b>ahmad</b><span>gitlab · no checks yet</span></div>
+            <span class="r">not checked yet</span>
+            <span class="act"><button class="tb-btn">CHECK NOW</button><button class="del">remove</button></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Bluesky ══ -->
+    <section class="page" data-page="bluesky">
+      <div class="page-h slim"><h1>dawn.example.bsky.social</h1></div>
+      <div class="timebar">
+        <h1 class="tb-title">Bluesky</h1>
+        <button class="tb-check">CHECK AGAIN</button>
+        <span class="tb-now">◷ last check <b>28 OCT · 08:29</b></span>
+        <span class="tb-btn">BASELINE <b>24 OCT · 14:09</b></span>
+      </div>
+
+      <div class="center-col">
+        <div class="stats">
+          <div class="stat click">
+            <div class="k">Followers<span class="chev">▾</span></div>
+            <div class="v">1,211</div>
+            <div class="d up">▲ +7 vs last check</div>
+          </div>
+          <div class="stat click">
+            <div class="k">Following<span class="chev">▾</span></div>
+            <div class="v">342</div>
+            <div class="d up">▲ +1 vs last check</div>
+          </div>
+          <div class="stat">
+            <div class="k">Posts</div>
+            <div class="v">89</div>
+            <div class="d up">▲ +2 vs last check</div>
+          </div>
+          <div class="stat">
+            <div class="k">Checks</div>
+            <div class="v">5</div>
+            <div class="d">baseline 24 Oct · 14:09</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Followers · +3 new, −1 unfollowed since 24 Oct</h3>
+          <div class="partial">PARTIAL LIST — sampled within the first 400 followers.
+            Changes below are real, but absence of change here does not mean nobody followed.</div>
+          <div class="prows">
+            <div class="prow"><span class="pa">NO</span><span class="pn">nova.bsky.social</span><span class="pt">new follower</span></div>
+            <div class="prow"><span class="pa">KI</span><span class="pn">kit.miller</span><span class="pt">new follower</span></div>
+            <div class="prow"><span class="pa">RU</span><span class="pn">rune.bsky.social</span><span class="pt">new follower</span></div>
+            <div class="prow"><span class="pa out">GH</span><span class="pn">ghost.bsky.social</span><span class="pt">unfollowed</span></div>
+          </div>
+          <div class="panel-f">4 changes · sampled first 400 · click the stat to collapse</div>
+        </div>
+
+        <div class="sect">
+          <h2>New posts (2)</h2>
+          <div class="feed">
+            <div class="post">
+              <div class="av">D</div>
+              <div class="body">
+                <div class="meta"><b>dawn.example.bsky.social</b> 28 Oct <a class="pl" href="#">bsky.app/post/3m2… ↗</a></div>
+                <div class="txt">“new grid shot from the coast”</div>
+              </div>
+            </div>
+            <div class="post">
+              <div class="av">D</div>
+              <div class="body">
+                <div class="meta"><b>dawn.example.bsky.social</b> 27 Oct <a class="pl" href="#">bsky.app/post/3m1… ↗</a></div>
+                <div class="txt">“shipping the sensor sync tonight…”</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <h2>History — scroll →</h2>
+          <div class="tlscroll"><div class="tltrack">
+            <div class="tlcard">
+              <div class="tld">24 Oct · 14:09</div><div class="tlnode"></div>
+              <div class="tlb"><b>Baseline established</b><br>1,204 followers · 341 following · 87 posts</div>
+            </div>
+            <div class="tlcard">
+              <div class="tld">25 Oct · 21:47</div><div class="tlnode"></div>
+              <div class="tlb"><span class="warn">+4 followers</span> · −2 following · <span class="warn">+3 posts</span></div>
+            </div>
+            <div class="tlcard">
+              <div class="tld">26 Oct · 09:14</div><div class="tlnode"></div>
+              <div class="tlb">no changes · counts held</div>
+            </div>
+            <div class="tlcard">
+              <div class="tld">27 Oct · 19:02</div><div class="tlnode"></div>
+              <div class="tlb"><span class="warn">+1 follower</span> · <span class="warn">+1 post</span></div>
+            </div>
+            <div class="tlcard">
+              <div class="tld">28 Oct · 08:29</div><div class="tlnode"></div>
+              <div class="tlb"><span class="warn">+3 followers</span> · −1 unfollowed · <span class="warn">+2 following</span> · <span class="warn">+2 posts</span></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Mastodon ══ -->
+    <section class="page" data-page="mastodon">
+      <div class="page-h slim"><h1>dawn@social.example</h1></div>
+      <div class="timebar">
+        <h1 class="tb-title">Mastodon</h1>
+        <button class="tb-check">CHECK AGAIN</button>
+        <span class="tb-now">◷ last check <b>28 OCT · 08:31</b></span>
+        <span class="tb-btn">BASELINE <b>27 OCT · 11:30</b></span>
+      </div>
+
+      <div class="center-col">
+        <div class="stats">
+          <div class="stat">
+            <div class="k">Followers</div>
+            <div class="v">816</div>
+            <div class="d up">▲ +4 vs last check</div>
+          </div>
+          <div class="stat">
+            <div class="k">Following</div>
+            <div class="v">298</div>
+            <div class="d">0 vs last check</div>
+          </div>
+          <div class="stat click">
+            <div class="k">Posts<span class="chev">▾</span></div>
+            <div class="v">1,344</div>
+            <div class="d up">▲ +1 vs last check</div>
+          </div>
+          <div class="stat">
+            <div class="k">Checks</div>
+            <div class="v">2</div>
+            <div class="d">baseline 27 Oct · 11:30</div>
+          </div>
+        </div>
+
+        <div class="panel withheld">
+          <h3>Followers · no diff claimed</h3>
+          <div class="withheld-txt">The baseline run sampled the first 400 followers and this
+            instance refused the list this time (auth required), so the two lists cannot be
+            compared and <b>no “no change” is being claimed</b>. The counts above are real and
+            still tracked: followers 812 → 816. A burner login would unlock the list.</div>
+        </div>
+
+        <div class="sect">
+          <h2>New posts (1)</h2>
+          <div class="feed">
+            <div class="post">
+              <div class="av">D</div>
+              <div class="body">
+                <div class="meta"><b>dawn@social.example</b> 28 Oct <a class="pl" href="#">social.example/@dawn/113… ↗</a></div>
+                <div class="txt">“instance upgrade tonight, expect a blip”</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <h2>History — scroll →</h2>
+          <div class="tlscroll"><div class="tltrack">
+            <div class="tlcard">
+              <div class="tld">27 Oct · 11:30</div><div class="tlnode"></div>
+              <div class="tlb"><b>Baseline established</b><br>812 followers · 298 following · 1,343 posts</div>
+            </div>
+            <div class="tlcard">
+              <div class="tld">28 Oct · 08:31</div><div class="tlnode"></div>
+              <div class="tlb"><span class="warn">+4 followers</span> (count only) · lists not comparable · <span class="warn">+1 post</span></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Instagram ══ -->
+    <section class="page" data-page="instagram">
+      <div class="page-h slim"><h1>dawn.shoots</h1></div>
+      <div class="timebar">
+        <h1 class="tb-title">Instagram</h1>
+        <button class="tb-check">CHECK AGAIN</button>
+        <span class="pill dot live">BURNER LOGGED IN</span>
+        <span class="tb-now">◷ last check <b>28 OCT · 08:35</b></span>
+        <span class="tb-btn">BASELINE <b>27 OCT · 22:15</b></span>
+      </div>
+
+      <div class="center-col">
+        <div class="stats">
+          <div class="stat click">
+            <div class="k">Followers<span class="chev">▾</span></div>
+            <div class="v">12,402</div>
+            <div class="d up">▲ +5 vs last check</div>
+          </div>
+          <div class="stat">
+            <div class="k">Following</div>
+            <div class="v">301</div>
+            <div class="d">0 vs last check</div>
+          </div>
+          <div class="stat click">
+            <div class="k">Posts<span class="chev">▾</span></div>
+            <div class="v">640</div>
+            <div class="d up">▲ +1 vs last check</div>
+          </div>
+          <div class="stat">
+            <div class="k">Checks</div>
+            <div class="v">3</div>
+            <div class="d">baseline 27 Oct · 22:15</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Followers · +5 new since 27 Oct</h3>
+          <div class="partial">PARTIAL LIST — Instagram only serves part of the list to a
+            logged-out visitor; a burner is active, so this run read more. Changes below are
+            real, but absence of change here does not mean nobody followed.</div>
+          <div class="prows">
+            <div class="prow"><span class="pa">FR</span><span class="pn">frames.by.mo</span><span class="pt">new follower</span></div>
+            <div class="prow"><span class="pa">TI</span><span class="pn">t_illustrated</span><span class="pt">new follower</span></div>
+            <div class="prow"><span class="pa">HA</span><span class="pn">harbor.light</span><span class="pt">new follower</span></div>
+            <div class="prow"><span class="pa">DU</span><span class="pn">dusk_routine</span><span class="pt">new follower</span></div>
+            <div class="prow"><span class="pa">AN</span><span class="pn">analog.days</span><span class="pt">new follower</span></div>
+          </div>
+          <div class="panel-f">5 changes · sampled first 400 · click the stat to collapse</div>
+        </div>
+
+        <div class="sect">
+          <h2>Stories &amp; media</h2>
+          <div class="rows">
+            <div class="rowi">
+              <div class="n"><b>4 new stories</b><span>posted in the last 10h · saved to media/stories</span></div>
+              <span class="pill red">NEW</span>
+            </div>
+            <div class="rowi">
+              <div class="n"><b>2 new media files</b><span>CGX1j2.jpg · CGX1j3.mp4</span></div>
+              <span class="pill red">NEW</span>
+            </div>
+            <div class="rowi">
+              <div class="n"><b>1 new post</b><span>“harbor lights, 6am” · carousel · 28 Oct</span></div>
+              <span class="pill red">NEW</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sect">
+          <h2>History — scroll →</h2>
+          <div class="tlscroll"><div class="tltrack">
+            <div class="tlcard">
+              <div class="tld">27 Oct · 22:15</div><div class="tlnode"></div>
+              <div class="tlb"><b>Baseline established</b><br>12,397 followers · 639 posts</div>
+            </div>
+            <div class="tlcard">
+              <div class="tld">28 Oct · 08:35</div><div class="tlnode"></div>
+              <div class="tlb"><span class="warn">+5 followers</span> · <span class="warn">+4 stories</span> · <span class="warn">+2 media</span> · <span class="warn">+1 post</span></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ GitHub ══ -->
+    <section class="page" data-page="github">
+      <div class="page-h slim"><h1>ahmad-dev</h1></div>
+      <div class="timebar">
+        <h1 class="tb-title">GitHub</h1>
+        <button class="tb-check">CHECK AGAIN</button>
+        <span class="tb-now">◷ last check <b>28 OCT · 08:33</b></span>
+        <span class="tb-btn">BASELINE <b>20 OCT · 17:02</b></span>
+      </div>
+
+      <div class="center-col">
+        <div class="stats">
+          <div class="stat click">
+            <div class="k">Followers<span class="chev">▾</span></div>
+            <div class="v">310</div>
+            <div class="d up">▲ +2 vs last check</div>
+          </div>
+          <div class="stat">
+            <div class="k">Following</div>
+            <div class="v">42</div>
+            <div class="d up">▲ +1 vs last check</div>
+          </div>
+          <div class="stat click">
+            <div class="k">Repos<span class="chev">▾</span></div>
+            <div class="v">57</div>
+            <div class="d up">▲ 1 added · 1 removed</div>
+          </div>
+          <div class="stat">
+            <div class="k">Checks</div>
+            <div class="v">10</div>
+            <div class="d">baseline 20 Oct · 17:02</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Repositories · 1 added, 1 removed since 20 Oct</h3>
+          <div class="prows">
+            <div class="prow"><span class="pa">SE</span><span class="pn">sensor-sync</span><span class="pt">added 27 Oct</span></div>
+            <div class="prow"><span class="pa out">OL</span><span class="pn">old-sandbox</span><span class="pt">removed / private</span></div>
+          </div>
+          <div class="panel-f">2 changes · click the stat to collapse</div>
+        </div>
+
+        <div class="sub-panel">
+          <div class="kv"><span>repository</span>
+            <a class="ext" style="margin-left:0" href="#">OPEN github.com/ahmad-dev/sensor-sync ↗</a></div>
+          <div class="kv"><span>language</span>Python</div>
+          <div class="kv"><span>stars / forks</span>12 / 0</div>
+          <div class="kv"><span>created</span>27 Oct 2026</div>
+          <div class="kv"><span>first seen by us</span>28 Oct · 08:33</div>
+        </div>
+
+        <div class="sect">
+          <h2>History — scroll →</h2>
+          <div class="tlscroll"><div class="tltrack">
+            <div class="tlcard">
+              <div class="tld">20 Oct · 17:02</div><div class="tlnode"></div>
+              <div class="tlb"><b>Baseline established</b><br>308 followers · 57 repos</div>
+            </div>
+            <div class="tlcard">
+              <div class="tld">26 Oct · 12:04</div><div class="tlnode"></div>
+              <div class="tlb"><span class="warn">+1 follower</span> · ★ +3 on sensor-core</div>
+            </div>
+            <div class="tlcard">
+              <div class="tld">27 Oct · 12:05</div><div class="tlnode"></div>
+              <div class="tlb">no changes</div>
+            </div>
+            <div class="tlcard">
+              <div class="tld">28 Oct · 08:33</div><div class="tlnode"></div>
+              <div class="tlb"><span class="warn">+1 repo</span> · <b>−1 repo</b> · <span class="warn">+2 followers</span> · <span class="warn">+1 following</span></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ GitLab — target added, never checked ══ -->
+    <section class="page" data-page="gitlab">
+      <div class="page-h slim"><h1>ahmad</h1></div>
+      <div class="timebar">
+        <h1 class="tb-title">GitLab</h1>
+        <button class="tb-check">CHECK AGAIN</button>
+      </div>
+      <div class="center-col">
+        <div class="blank">
+          <div class="blank-t">NO CHECKS YET</div>
+          This target was added in <b>Targets</b> but has never been checked —
+          <b>CHECK AGAIN</b> establishes the baseline, and every check after it
+          reports what changed.
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Keybase — no target ══ -->
+    <section class="page" data-page="keybase">
+      <div class="page-h"><h1>Keybase</h1></div>
+      <div class="timebar">
+        <h1 class="tb-title">Keybase</h1>
+      </div>
+      <div class="center-col">
+        <div class="blank">
+          <div class="blank-t">NO TARGET</div>
+          No Keybase target is tracked. Add one in <b>Targets</b> — its tab becomes
+          the CHECK AGAIN dashboard.
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Email (manual search, unchanged) ══ -->
+    <section class="page tool" data-page="email">
+      <div class="page-h"><h1>Email</h1></div>
+      <div class="sect">
+        <div class="run-col">
+          <div class="pf">
+            <label>Email address</label>
+            <input class="inp" type="text" placeholder="user@example.com" />
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" /> JSON</label>
+            <label><input type="checkbox" /> Markdown report</label>
+            <label><input type="checkbox" /> Store in Cases</label>
+          </div>
+          <div class="form-actions">
+            <button class="tb-check">RUN EMAIL RECON</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Username (manual search, unchanged) ══ -->
+    <section class="page tool" data-page="username">
+      <div class="page-h"><h1>Username</h1></div>
+      <div class="sect">
+        <div class="run-col">
+          <div class="pf">
+            <label>Username</label>
+            <input class="inp" type="text" placeholder="username" />
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" /> JSON</label>
+            <label><input type="checkbox" /> Markdown report</label>
+            <label><input type="checkbox" /> Store in Cases</label>
+          </div>
+          <div class="form-actions">
+            <button class="tb-check">RUN USERNAME SEARCH</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Phone (manual search, unchanged) ══ -->
+    <section class="page tool" data-page="phone">
+      <div class="page-h"><h1>Phone Number</h1></div>
+      <div class="sect">
+        <div class="run-col">
+          <div class="pf">
+            <label>Phone number</label>
+            <input class="inp" type="text" placeholder="+1 555 000 0000" />
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" /> JSON</label>
+            <label><input type="checkbox" /> Markdown report</label>
+            <label><input type="checkbox" /> Store in Cases</label>
+          </div>
+          <div class="form-actions">
+            <button class="tb-check">RUN PHONE RECON</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Dark Web (manual search, unchanged) ══ -->
+    <section class="page" data-page="darkweb">
+      <div class="page-h"><h1>Dark Web</h1></div>
+      <div class="sect">
+        <div class="run-col">
+          <div class="pf">
+            <label>Query</label>
+            <input class="inp" type="text" placeholder="user@example.com" />
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" /> JSON</label>
+            <label><input type="checkbox" /> Markdown report</label>
+            <label><input type="checkbox" /> Store in Cases</label>
+          </div>
+          <div class="form-actions">
+            <button class="tb-check">RUN DARK WEB CHECK</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Website (light recon, unchanged) ══ -->
+    <section class="page" data-page="website">
+      <div class="page-h"><h1>Website</h1></div>
+      <div class="sect">
+        <div class="run-col">
+          <div class="pf">
+            <label>Domain</label>
+            <input class="inp" type="text" placeholder="example.com" />
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" /> JSON</label>
+            <label><input type="checkbox" /> Markdown report</label>
+            <label><input type="checkbox" /> Store in Cases</label>
+          </div>
+          <div class="form-actions">
+            <button class="tb-check">RUN LIGHT WEBSITE RECON</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Full Investigation ══ -->
+    <section class="page" data-page="investigate">
+      <div class="page-h"><h1>Full Investigation</h1></div>
+      <div class="sect">
+        <div class="run-col">
+          <div class="pf">
+            <label>Target</label>
+            <input class="inp" type="text" placeholder="email, username, phone or domain" />
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" /> JSON</label>
+            <label><input type="checkbox" /> Markdown report</label>
+            <label><input type="checkbox" /> Store in Cases</label>
+          </div>
+          <div class="form-actions">
+            <button class="tb-check">RUN INVESTIGATION</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Metadata ══ -->
+    <section class="page tool" data-page="metadata">
+      <div class="page-h"><h1>Metadata</h1></div>
+      <div class="sect">
+        <div class="run-col">
+          <div class="pf">
+            <label>File</label>
+            <input class="inp" type="text" placeholder="path to image or document" />
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" /> JSON</label>
+            <label><input type="checkbox" /> Store in Cases</label>
+          </div>
+          <div class="form-actions">
+            <button class="tb-check">EXTRACT METADATA</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ OPSEC ══ -->
+    <section class="page" data-page="opsec">
+      <div class="page-h"><h1>OPSEC Check</h1></div>
+      <div class="sect">
+        <div class="run-col">
+          <div class="form-actions">
+            <button class="tb-check">RUN LOCAL OPSEC CHECK</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Settings (APIs and burners only) ══ -->
+    <section class="page" data-page="settings">
+      <div class="page-h"><h1>Settings</h1></div>
+
+      <div class="sect s">
+        <h2><i>01</i>API keys</h2>
+        <div class="run-col">
+          <div class="field"><label>HIBP API key</label><div class="v"><input class="inp" type="password" placeholder="not set" /></div></div>
+          <div class="field"><label>Proxy</label><div class="v"><input class="inp" type="text" placeholder="http://127.0.0.1:9050" /></div></div>
+        </div>
+      </div>
+
+      <div class="sect s">
+        <h2><i>02</i>Burner account</h2>
+        <div class="run-col">
+          <div class="field"><label>Instagram burner</label><div class="v">
+            <input class="inp" type="text" placeholder="username" style="max-width:200px;" />
+            <input class="inp" type="password" placeholder="password" style="max-width:200px;" />
+          </div></div>
+        </div>
+      </div>
+
+      <div class="sect s">
+        <h2><i>03</i>Targets</h2>
+        <div class="run-col">
+          <div class="field"><label>Tracked handles</label><div class="v">managed in the Targets tab</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Stored Cases ══ -->
+    <section class="page" data-page="cases">
+      <div class="page-h"><h1>Stored Cases</h1></div>
+      <div class="sect">
+        <div class="empty">No stored cases yet.</div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* Mockup only: the sidebar switches pages, like GREENWICH. */
+(function () {
+  var all = Array.prototype.slice.call(document.querySelectorAll('.nav a'));
+  var pages = Array.prototype.slice.call(document.querySelectorAll('.page'));
+  all.forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      var page = a.getAttribute('data-page');
+      if (!page) return;
+      all.forEach(function (x) { x.classList.remove('on'); });
+      a.classList.add('on');
+      pages.forEach(function (s) {
+        s.classList.toggle('on', s.getAttribute('data-page') === page);
+      });
+      window.scrollTo(0, 0);
+    });
+  });
+})();
+</script>
+</body>
+</html>

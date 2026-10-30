@@ -34,9 +34,6 @@ class SchemaContract(unittest.TestCase):
 
     def test_engine_family_per_query_type(self):
         self.assertEqual(
-            facts.normalize({"ports": []}, "lens", "1.2.3.4")["engine"],
-            "lens_extender")
-        self.assertEqual(
             facts.normalize({"entities": {}, "correlations": []},
                             "investigation", "a@x.com")["engine"],
             "correlated")
@@ -124,13 +121,6 @@ class EntityExtractionTest(unittest.TestCase):
         # One entity, not two: target and collected handle are the same
         # value, and a graph node must not double up.
         self.assertEqual(_entity_values(block, "username").count("somebody"), 1)
-
-    def test_lens_entities_come_from_resolved_ip(self):
-        block = facts.normalize(
-            {"resolved_ip": "9.9.9.9", "hostnames": ["x.example.com"],
-             "target": "example.com"}, "lens", "example.com")
-        self.assertIn("9.9.9.9", _entity_values(block, "ip"))
-        self.assertIn("x.example.com", _entity_values(block, "domain"))
 
 
 class FactExtractionTest(unittest.TestCase):

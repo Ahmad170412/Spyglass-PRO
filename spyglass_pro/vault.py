@@ -31,7 +31,7 @@ VAULT_FILE = VAULT_DIR / "vault.json"
 LEGACY_FILE = Path.home() / ".lens-extender" / "config.json"
 
 # The only keys this build stores. Everything else the legacy config
-# held belonged to the dormant IP/Lens infrastructure and is left there.
+# held belonged to the removed IP/Lens infrastructure and is left there.
 KEYS = ("intelx_api_key", "hibp_api_key", "proxy", "socks_proxy")
 
 

@@ -11,10 +11,14 @@ counts and last-activity times, with GitLab's own ``X-Total`` header
 giving the *real* public-project count for the account.
 
 The keyless budget is generous (500 requests/minute per IP,
-``throttle_unauthenticated_api``) and the adapter spends at most two: the
-user lookup and the ten most recently active public projects — which,
-for a GitLab account, are the recent activity. The optional
-``GITLAB_TOKEN`` environment variable is honoured when present and the
+``throttle_unauthenticated_api``) and the adapter spends its requests
+carefully: the user lookup, one page of the forty most recently active
+public projects, and — only when a ``GITLAB_TOKEN`` is present — bounded
+walks of the follower/following lists. Keyless, those list routes answer
+403 (spike-verified: the routes exist and are user-token-gated), so the
+adapter says exactly that in a wall instead of spending a request to
+rediscover it each check. The optional ``GITLAB_TOKEN`` environment
+variable is honoured when present and the
 budget note then reads GitLab's own headers instead of assuming 500,
 because the only version of that sentence that stays true is the one
 the instance itself reports.
@@ -37,6 +41,7 @@ import re as _re
 import httpx
 
 from .. import registry
+from ..lists import RECORD_CAP, record
 from ..schema import add_note, set_fields
 
 CAPABILITIES = (
@@ -49,7 +54,9 @@ _TIMEOUT = 20.0
 # 500/minute per IP unauthenticated (throttle_unauthenticated_api) —
 # generous, but the number is still read from GitLab's own headers and
 # reported on every result, because sweeps can chew through it too.
-_RECENT_PROJECTS = 10
+# One page of recent projects — the dashboard's standard 40-item check
+# window (GitLab serves up to 100 per page).
+_RECENT_PROJECTS = 40
 _KEYLESS_LIMIT = 500
 
 # GitLab usernames (namespace paths): alphanumerics plus _ - . — must not
@@ -186,6 +193,12 @@ def collect(page, cfg, handle: str, result: dict) -> None:
             normalize(profile, result)
             result["source"] = "gitlab.com/api/v4 (keyless)"
             user_id = profile.get("id")
+            # Graph lists: token-gated. Keyless skips the 403 probes
+            # entirely — the wall below is the honest, free answer. Runs
+            # before the projects leg so a project-endpoint failure can
+            # never skip it.
+            for kind in ("followers", "following"):
+                _walk_list(client, user_id, kind, bool(token), result)
             if user_id is None:
                 add_note(result, "public projects unavailable "
                                  "(API returned no user id)")
@@ -239,6 +252,54 @@ def _get(client: httpx.Client, path: str, params: dict | None = None):
     except Exception:
         return response.status_code, None, lower
     return response.status_code, data, lower
+
+
+def _walk_list(client: httpx.Client, user_id, kind: str, has_token: bool,
+               result: dict) -> None:
+    """Walk a graph list with a token; wall it honestly without one.
+
+    Spike-verified: ``/users/:id/followers|following`` answer 403
+    keyless (routes exist, user-scoped token required), so a keyless
+    check walls with that exact reason and costs zero requests. With a
+    token, page-number pagination to RECORD_CAP, short page = the end.
+    """
+    if not has_token:
+        record(result, kind, [], None, False,
+               error="auth-gated — keyless access cannot enumerate this list "
+                     "(set GITLAB_TOKEN to unlock)")
+        return
+    handles: list[str] = []
+    page = 1
+    exhausted = False
+    error = None
+    max_pages = RECORD_CAP // 100 + 1
+    while len(handles) < RECORD_CAP and page <= max_pages:
+        status, batch, headers = _get(
+            client, f"/users/{user_id}/{kind}", {"per_page": 100, "page": page})
+        if status in (403, 429):
+            if _limit_remaining(headers)[1] == 0:
+                error = "walk interrupted — request budget exhausted mid-walk"
+            else:
+                error = (f"list endpoint answered HTTP {status} mid-walk "
+                         "(token scope or rate limit)")
+            break
+        if status == 0:
+            error = "list walk interrupted (network error mid-walk)"
+            break
+        if status != 200 or not isinstance(batch, list):
+            error = f"list endpoint answered HTTP {status}"
+            break
+        if not batch:
+            exhausted = True
+            break
+        for user in batch:
+            if isinstance(user, dict) and user.get("username"):
+                handles.append(str(user["username"]))
+        if len(batch) < 100:
+            exhausted = True
+            break
+        page += 1
+    record(result, kind, handles, None, exhausted, error=error)
 
 
 platform = registry.register(registry.Platform(

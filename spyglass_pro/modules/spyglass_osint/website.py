@@ -5,10 +5,10 @@ records, reads Certificate Transparency logs and queries WHOIS registries,
 and stops there. It does not fetch the target's pages, probe its ports,
 brute-force paths, or enumerate subdomains by dictionary.
 
-Scope in 1.3: owner/registrant + WHOIS, basic DNS, and certificate
+Scope: owner/registrant + WHOIS, basic DNS, and certificate
 transparency only. Shodan, the aggregated subdomain sweep and Wayback
-history are dormant — their helpers stay in-tree for the sibling tool but
-``_collect`` no longer calls them.
+history were deleted outright in the 2026-10 cleanup rather than left
+dormant in-tree — ``_collect`` below is the whole module.
 
 Active collection lives in a separate project. Everything that used to run
 here was removed rather than switched off, so none of it can be re-enabled
@@ -46,7 +46,6 @@ import json
 import os
 import re
 import socket
-import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -54,7 +53,6 @@ from . import utils
 from .utils import (
     _CURL,
     _DIG,
-    _SHODAN,
     _WHOIS,
     _check_tool,
     _extract_emails,
@@ -160,22 +158,6 @@ def _http_json(url, timeout=15):
 
 # ─── DNS layer (proxy-aware) ──────────────────────────────
 
-def _is_ipv4(s):
-    try:
-        socket.inet_pton(socket.AF_INET, s)
-        return True
-    except (OSError, ValueError):
-        return False
-
-
-def _is_ipv6(s):
-    try:
-        socket.inet_pton(socket.AF_INET6, s)
-        return True
-    except (OSError, ValueError):
-        return False
-
-
 def _dig_short(*args, timeout=10):
     """Run ``dig <args> +short`` and return stdout only on success.
 
@@ -214,21 +196,6 @@ def _resolve_a(host):
     return None
 
 
-def _reverse_dns(ip):
-    """PTR lookup via dig (proxy) or native resolver."""
-    if _DIG:
-        raw = _dig_short("-x", ip)
-        val = raw.split("\n")[0].strip().rstrip(".")
-        if val and val != ".":
-            return val
-    if not utils._PROXY:
-        try:
-            return socket.gethostbyaddr(ip)[0]
-        except Exception:
-            pass
-    return None
-
-
 def _is_wildcard(host):
     """Detect wildcard DNS by resolving a random subdomain."""
     probe = f"{os.urandom(4).hex()}.{host}"
@@ -244,7 +211,7 @@ def _future_result(fut, default):
         return default
 
 
-# ─── subdomain sources ────────────────────────────────────
+# ─── certificate transparency ────────────────────────────
 
 def _crt_subs(host):
     subs = set()
@@ -259,78 +226,6 @@ def _crt_subs(host):
                     subs.add(name)
     return subs
 
-
-def _certspotter_subs(host):
-    """Certificate Transparency via CertSpotter — free, no key."""
-    subs = set()
-    data = _http_json(
-        f"https://api.certspotter.com/v1/issuances?domain={host}"
-        f"&include_subdomains=true&expand=dns_names"
-    )
-    if isinstance(data, list):
-        for entry in data:
-            if not isinstance(entry, dict):
-                continue
-            for name in entry.get("dns_names", []):
-                name = str(name).strip().lower().lstrip("*.")
-                if name and (name.endswith(f".{host}") or name == host):
-                    subs.add(name)
-    return subs
-
-
-def _hackertarget_subs(host):
-    """Returns (subs, ips). Free, no key, rate-limited per source IP."""
-    subs, ips = set(), set()
-    body = _http_body(f"https://api.hackertarget.com/hostsearch/?q={host}")
-    if not body or "error" in body.lower() or "api count" in body.lower():
-        return subs, ips
-    for line in body.splitlines():
-        line = line.strip()
-        if "," not in line:
-            continue
-        sub, ip = line.split(",", 1)
-        sub = sub.strip().lower().lstrip("*.")
-        if sub and (sub.endswith(f".{host}") or sub == host):
-            subs.add(sub)
-            if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", ip.strip()):
-                ips.add(ip.strip())
-    return subs, ips
-
-
-def _wayback_cdx(host):
-    """One CDX query with matchType=domain: subdomains + snapshot history."""
-    out = {"subs": set(), "first": "", "last": "", "count": 0}
-    url = (
-        f"https://web.archive.org/cdx/search/cdx?url={host}&matchType=domain"
-        f"&output=json&fl=timestamp,original,statuscode"
-        f"&filter=statuscode:200&collapse=urlkey&limit=3000"
-    )
-    data = _http_json(url, timeout=30)
-    if not isinstance(data, list) or len(data) < 2:
-        return out
-    stamps = []
-    for row in data[1:]:
-        if not isinstance(row, list) or len(row) < 2:
-            continue
-        stamps.append(row[0])
-        original = str(row[1])
-        parsed = urllib.parse.urlparse(original if "://" in original else f"//{original}")
-        h = (parsed.hostname or "").lower()
-        if h and (h.endswith(f".{host}") or h == host):
-            out["subs"].add(h)
-    if stamps:
-        out["first"] = min(stamps)
-        out["last"] = max(stamps)
-        out["count"] = len(stamps)
-    return out
-
-
-# ─── fingerprinting ───────────────────────────────────────
-
-# ─── content discovery ────────────────────────────────────
-
-
-# ─── DNS email security ───────────────────────────────────
 
 def _dns_email_security(host):
     out = {}
@@ -392,7 +287,6 @@ def website(target, display=None):
 def _phase_dns(host):
     """A/AAAA/... records, email security, wildcard DNS."""
     result = {}
-    ips = set()
     dns = {}
     if _DIG:
         for rtype in ("A", "AAAA", "MX", "NS", "TXT", "CNAME", "CAA", "SOA"):
@@ -400,13 +294,6 @@ def _phase_dns(host):
             vals = [ln.strip() for ln in raw.split("\n") if ln.strip()]
             if vals:
                 dns[rtype] = ", ".join(vals)
-            if rtype in ("A", "AAAA"):
-                for line in vals:
-                    # `dig +short` can emit a CNAME target alongside the A
-                    # record; only keep addresses so PTR/sweep/scans stay valid.
-                    line = line.rstrip(".")
-                    if _is_ipv4(line) or _is_ipv6(line):
-                        ips.add(line)
     if dns:
         result["dns_records"] = dns
     try:
@@ -415,44 +302,12 @@ def _phase_dns(host):
             result["dns_email_security"] = es
     except Exception:
         pass
-    wild, wild_ip = False, ""
     try:
         wild, wild_ip = _is_wildcard(host)
         result["wildcard_dns"] = {"detected": "yes" if wild else "no",
                                   "resolves_to": wild_ip or ""}
     except Exception:
         pass
-    result["_ips"] = ips
-    result["_wild"] = wild
-    result["_wild_ip"] = wild_ip
-    return result
-
-
-def _phase_passive_subs(host):
-    """Passive subdomain sources (crt.sh, HackerTarget, CertSpotter, Wayback)."""
-    result = {}
-    passive_subs, passive_ips = set(), set()
-    sources = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
-        crt_f = pool.submit(_crt_subs, host)
-        ht_f = pool.submit(_hackertarget_subs, host)
-        cs_f = pool.submit(_certspotter_subs, host)
-        wb_f = pool.submit(_wayback_cdx, host)
-        crt = _future_result(crt_f, set())
-        ht_subs, ht_ips = _future_result(ht_f, (set(), set()))
-        cs = _future_result(cs_f, set())
-        wb = _future_result(wb_f, {"subs": set(), "first": "", "last": "", "count": 0})
-    passive_subs |= crt | ht_subs | cs | wb.get("subs", set())
-    passive_ips |= ht_ips
-    sources["crt_sh"] = len(crt)
-    sources["hackertarget"] = len(ht_subs)
-    sources["certspotter"] = len(cs)
-    sources["wayback"] = len(wb.get("subs", set()))
-    result["_passive_subs"] = passive_subs
-    result["_passive_ips"] = passive_ips
-    result["_sources"] = sources
-    result["_crt"] = crt
-    result["_wb"] = wb
     return result
 
 
@@ -460,9 +315,8 @@ def _phase_ct(host):
     """Certificate transparency names (crt.sh) — CT, not enumeration.
 
     Only the certificate-transparency source is read. The aggregated
-    subdomain sweep (HackerTarget / CertSpotter / Wayback) is dormant with
-    the rest of the infra work; ``_phase_passive_subs`` stays in-tree for
-    the sibling tool.
+    subdomain sweep (HackerTarget / CertSpotter / Wayback) was deleted
+    with the rest of the infra work rather than left dormant in-tree.
     """
     result = {}
     try:
@@ -472,7 +326,6 @@ def _phase_ct(host):
     if names:
         result["ct"] = sorted(names)
     return result
-
 
 
 def _phase_whois(host):
@@ -508,60 +361,6 @@ def _phase_whois(host):
     return result
 
 
-def _phase_shodan_ports(ips):
-    """Shodan host data + reverse DNS. Both read third-party sources."""
-    result = {}
-    if ips and _check_tool("shodan", _SHODAN):
-        shodan_data = []
-        for ip in ips[:3]:
-            try:
-                r = utils._run_text(["shodan", "host", ip],
-                                 timeout=20, env=utils._proxy_env())
-            except Exception as exc:
-                shodan_data.append(f"{ip}: {exc}")
-                continue
-            data, err = r.stdout.strip(), r.stderr.strip()
-            if data:
-                org = isp = country = ports = ""
-                for line in data.split("\n"):
-                    low = line.lower()
-                    if "organization" in low or low.startswith("org:"):
-                        org = line.split(":", 1)[1].strip() if ":" in line else ""
-                    elif "isp" in low:
-                        isp = line.split(":", 1)[1].strip() if ":" in line else ""
-                    elif "country" in low:
-                        country = line.split(":", 1)[1].strip() if ":" in line else ""
-                    elif "ports" in low:
-                        ports = line.split(":", 1)[1].strip() if ":" in line else ""
-                parts = [p for p in (f"Org: {org}" if org else "",
-                                     f"ISP: {isp}" if isp else "",
-                                     f"Country: {country}" if country else "",
-                                     f"Ports: {ports}" if ports else "") if p]
-                shodan_data.append(f"{ip}: {' | '.join(parts)}" if parts else f"{ip}: No Shodan data")
-            elif "403" in err:
-                shodan_data.append(f"{ip}: Free tier limit")
-            elif "init" in err.lower():
-                shodan_data.append(f"{ip}: Shodan not configured")
-            elif err:
-                shodan_data.append(f"{ip}: {err.splitlines()[-1]}")
-            else:
-                shodan_data.append(f"{ip}: No Shodan data")
-        result["shodan"] = shodan_data
-
-    if ips:
-        try:
-            rdns = []
-            for ip in ips[:8]:
-                name = _reverse_dns(ip)
-                if name:
-                    rdns.append(f"{ip} -> {name}")
-            if rdns:
-                result["reverse_dns"] = rdns
-        except Exception:
-            pass
-    return result
-
-
 def _collect(target):
     host = utils._domain(target)
     _reset_caches()
@@ -569,9 +368,9 @@ def _collect(target):
 
     # Light website only: owner/registrant (WHOIS), basic DNS, and
     # certificate transparency. Everything heavier — Shodan, the aggregated
-    # subdomain sweep, Wayback history — is dormant with the rest of the
-    # infra work. No phase here opens a connection to the target: no page
-    # fetch, no port scan, no brute force. See the module docstring.
+    # subdomain sweep, Wayback history — was deleted rather than disabled.
+    # No phase here opens a connection to the target: no page fetch, no
+    # port scan, no brute force. See the module docstring.
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         dns_f = pool.submit(_phase_dns, host)
         whois_f = pool.submit(_phase_whois, host)

@@ -7,7 +7,8 @@ import threading
 import time
 from urllib.parse import urlparse, urlsplit
 
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import (Flask, Response, jsonify, render_template, request,
+                   send_file, stream_with_context)
 
 from spyglass_pro import __version__, runner, scope
 
@@ -62,6 +63,16 @@ def _validate_proxy(value):
         return None
     if parsed.scheme.lower() not in _PROXY_SCHEMES or not parsed.hostname:
         return None
+    # urlparse does not validate the port: "host:abc" and "host:99999"
+    # both parse and only blow up when ``.port`` is read — which the
+    # masking path does on every /api/status. Reject a broken port here,
+    # at the door, instead of storing a proxy that 500s the dashboard.
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is not None and port < 1:
+        return None
     return value
 
 
@@ -83,8 +94,15 @@ def _mask_proxy(value):
         return "••••"
     if parsed.username or parsed.password:
         host = parsed.hostname or ""
-        port = f":{parsed.port}" if parsed.port else ""
-        return f"{parsed.scheme}://••••@{host}{port}"
+        try:
+            port = parsed.port
+        except ValueError:
+            # A malformed port ("host:abc") parses but cannot be read.
+            # Masking runs on /api/status and the Settings snapshot — it
+            # must never be the thing that answers 500.
+            port = None
+        port_suffix = f":{port}" if port else ""
+        return f"{parsed.scheme}://••••@{host}{port_suffix}"
     return value
 
 
@@ -320,11 +338,6 @@ def api_status():
         "proxy": _mask_proxy(os.environ.get("SPYGLASS_PROXY", "")),
         "engines": {
             "spyglass": {"available": True, "label": "Spyglass-OSINT"},
-            # Lens is kept in-tree for the sibling tool but has no product
-            # surface in 1.3. Report it honestly instead of pretending it
-            # is a live engine.
-            "lens_extender": {"available": _module_imports("lens_extender"),
-                              "label": "Lens-Extender", "dormant": True},
             "social": {"available": _module_imports("instacloak"),
                        "label": "Social harness"},
         },
@@ -403,11 +416,12 @@ def _degraded(tools):
 #
 # Storage lives in spyglass_pro.vault (~/.spyglass/vault.json, 0600 on
 # POSIX). It used to live in the vendored Lens engine's config file; that
-# coupling would have broken Settings the day Lens is cut out, so the vault
-# owns its file and imports the old values once.
+# coupling would have broken Settings the day Lens was cut out of this
+# tree — which is exactly what happened — so the vault owns its file and
+# imports the old values once.
 #
 # Only the keys an exposed module actually reads are offered here. The
-# dormant IP/Lens infrastructure had its own keys (Shodan, VirusTotal,
+# removed IP/Lens infrastructure had its own keys (Shodan, VirusTotal,
 # AbuseIPDB, Censys, GreyNoise, NVD); they stayed in the legacy config
 # file and are not part of this build's Settings surface.
 
@@ -544,11 +558,6 @@ def api_spyglass_run():
     module = request.args.get("module", "")
     if not module:
         return jsonify({"error": "module parameter required"})
-    # Dormant code stays in-tree but has no product surface. Refuse it
-    # here, where every operator request lands, with wording that names
-    # the reason instead of a bare 404.
-    if scope.is_dormant_module(module):
-        return jsonify({"error": scope.dormant_error("module", module)}), 400
     # The scope list is the allowlist, not a comment: anything the runner
     # knows but this build does not expose is refused here. Without this a
     # new handler added to runner._SPYGLASS_HANDLERS would silently become
@@ -558,22 +567,12 @@ def api_spyglass_run():
             "error": f"unknown module: {module!r} — not part of this build"
         }), 400
     target = request.args.get("target", "")
+    # ``token`` is an auth channel, not a module flag: it must not ride
+    # into the engine, where a future flag consumer could echo it into a
+    # result, a progress line or an artifact.
     flags = {key: value for key, value in request.args.items()
-             if key not in ("module", "target", "async")}
+             if key not in ("module", "target", "async", "token")}
     return _submit_or_run(runner.run_spyglass, module, target, flags)
-
-
-@app.route("/api/lens/run")
-def api_lens_run():
-    """Lens-Extender is dormant in 1.3; the endpoint refuses honestly."""
-    if scope.is_dormant_engine("lens"):
-        return jsonify({"error": scope.dormant_error("engine", "lens")}), 400
-    target = request.args.get("target", "")
-    if not target:
-        return jsonify({"error": "target required"})
-    flags = {key: value for key, value in request.args.items()
-             if key not in ("target", "async")}
-    return _submit_or_run(runner.run_lens, target, flags)
 
 
 @app.route("/api/investigate/run", methods=["POST"])
@@ -597,19 +596,201 @@ def api_social_platforms():
     return jsonify(runner.social_platforms())
 
 
-@app.route("/api/social/run", methods=["POST"])
-def api_social_run():
-    """Collect one profile through the shared social harness."""
-    raw = request.get_json(silent=True) or {}
-    # Never forward the transport flag to the engine.
-    data = {k: v for k, v in raw.items() if k != "async"} if isinstance(raw, dict) else {}
+# ─── tracked targets (CHECK AGAIN) ────────────────────────
+#
+# Targets are managed entities, not form fields: they are added and
+# removed here, and the social tabs only ever *check* one — the first
+# check pins the baseline, later checks diff against it. Email, username
+# and website searches keep their manual in-tab inputs: they are
+# one-shot queries, not tracked identities.
+
+
+def _social_tracking():
+    """Lazy import — the dashboard must start without the social tree."""
+    from spyglass_pro.social import tracking
+    return tracking
+
+
+@app.route("/api/social/targets", methods=["GET", "POST"])
+def api_social_targets():
+    """List every tracked target, or register one (platform + handle)."""
+    tracking = _social_tracking()
+    if request.method == "GET":
+        try:
+            return jsonify(tracking.list_targets())
+        except Exception as exc:
+            return jsonify({"error": f"target store unavailable: "
+                                     f"{runner._safe_error(exc)}"}), 500
+    data = request.get_json(silent=True) or {}
     platform = (data.get("platform") or "").strip()
     handle = (data.get("handle") or "").strip()
-    if not platform:
-        return jsonify({"error": "platform required"})
-    if not handle:
-        return jsonify({"error": "handle required"})
-    return _submit_or_run(runner.run_social, platform, handle, data,
+    if not platform or not handle:
+        return jsonify({"error": "platform and handle are both required"}), 400
+    from spyglass_pro.social import registry
+    if registry.get(platform.lower()) is None:
+        return jsonify({"error": f"unknown platform: {platform}"}), 400
+    try:
+        return jsonify(tracking.add_target(platform, handle)), 201
+    except ValueError as exc:
+        # Duplicates land here too: "already tracked" is a refusal of
+        # *this* request, not a server fault — 400, not 500.
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/social/targets/<int:target_id>", methods=["GET", "DELETE"])
+def api_social_target(target_id):
+    """One target with its snapshot history, or forget it entirely."""
+    tracking = _social_tracking()
+    try:
+        if request.method == "DELETE":
+            if not tracking.remove_target(target_id):
+                return jsonify({"error": f"unknown target #{target_id}"}), 404
+            return jsonify({"deleted": target_id})
+        target = tracking.get_target(target_id)
+        if target is None:
+            return jsonify({"error": f"unknown target #{target_id}"}), 404
+        try:
+            limit = int(request.args.get("limit", tracking.HISTORY_LIMIT))
+        except (TypeError, ValueError):
+            limit = tracking.HISTORY_LIMIT
+        target["history"] = tracking.history(target_id, max(1, min(limit, 200)))
+        # Every check's verdict, not just the newest: the dashboard's
+        # timeline selects a past check, and its stats/diff must rewind to
+        # that check. Same engine either way — a second, client-side diff
+        # implementation is exactly how the UI starts claiming changes the
+        # engine would refuse. ``last_diff`` keeps its old meaning.
+        from spyglass_pro.social.diff import diff as _diff_payloads
+        hist = target["history"]
+        baseline_refusal = {
+            "ok": False, "changed": False,
+            "error": "no previous check to compare against — this run is the baseline",
+        }
+        for i, entry in enumerate(hist):
+            if i + 1 < len(hist):
+                entry["diff"] = _diff_payloads(hist[i + 1]["payload"],
+                                               entry["payload"])
+            else:
+                entry["diff"] = dict(baseline_refusal)
+        target["last_diff"] = hist[0]["diff"] if hist else None
+        return jsonify(target)
+    except Exception as exc:
+        return jsonify({"error": runner._safe_error(exc)}), 500
+
+
+# ─── Downloaded media (Instagram stories / post files) ─────────────
+#
+# Media paths live in the encrypted snapshots, but the browser needs bytes.
+# Two rules keep that from becoming a file-read primitive:
+#
+# * only files referenced by *this* target's snapshots are served, so one
+#   dashboard cannot read another target's downloads;
+# * the resolved path must sit under a configured output root, so a
+#   corrupted reference cannot reach the rest of the filesystem.
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _media_roots():
+    roots = [os.path.join(os.getcwd(), "output"),
+             os.path.join(_PROJECT_ROOT, "output")]
+    configured = os.environ.get("INSTACLOAK_OUTPUT_DIR")
+    if configured:
+        roots.append(os.path.abspath(configured))
+    out = []
+    for root in roots:
+        real = os.path.realpath(root)
+        if real not in out:
+            out.append(real)
+    return out
+
+
+def _canonical_media_candidates(ref):
+    """Every real path one stored media reference could resolve to.
+
+    The engine writes ``output/<handle>/…`` relative to the process cwd;
+    a server launched from elsewhere still needs to find it, so relative
+    references are tried against the cwd and the project root.
+    """
+    if not isinstance(ref, str) or not ref.strip():
+        return []
+    ref = ref.strip()
+    candidates = ([ref] if os.path.isabs(ref)
+                  else [os.path.join(base, ref)
+                        for base in (os.getcwd(), _PROJECT_ROOT)])
+    return [os.path.realpath(c) for c in candidates]
+
+
+def _referenced_media(target_id):
+    """Canonical paths referenced by this target's snapshots."""
+    files = set()
+    try:
+        hist = _social_tracking().history(target_id)
+    except Exception:
+        return files
+    for entry in hist:
+        payload = entry.get("payload") or {}
+        refs = list(payload.get("media_files") or [])
+        for post in payload.get("posts") or []:
+            if isinstance(post, dict):
+                refs.extend(post.get("media_files") or [])
+        stories = payload.get("stories")
+        if isinstance(stories, dict):
+            for item in stories.get("items") or []:
+                if isinstance(item, dict) and item.get("file"):
+                    refs.append(item["file"])
+        for ref in refs:
+            files.update(_canonical_media_candidates(ref))
+    return files
+
+
+def _resolve_media_path(target_id, requested):
+    """The real path to serve, or None. Allowlist + root containment."""
+    allowed = _referenced_media(target_id)
+    roots = [root + os.sep for root in _media_roots()]
+    for path in _canonical_media_candidates(requested):
+        if path not in allowed:
+            continue
+        if not any(path.startswith(root) for root in roots):
+            continue
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+@app.route("/api/social/media/<int:target_id>")
+def api_social_media(target_id):
+    """Serve one downloaded file referenced by this target's snapshots."""
+    if _social_tracking().get_target(target_id) is None:
+        return jsonify({"error": f"unknown target #{target_id}"}), 404
+    ref = (request.args.get("path") or "").strip()
+    if not ref:
+        return jsonify({"error": "path is required"}), 400
+    path = _resolve_media_path(target_id, ref)
+    if path is None:
+        return jsonify({"error": "no such media file on this target"}), 404
+    return send_file(path, conditional=True)
+
+
+
+@app.route("/api/social/targets/<int:target_id>/check", methods=["POST"])
+def api_social_target_check(target_id):
+    """CHECK AGAIN: collect the target, diff it against its last check.
+
+    Same transport contract as every other run route: blocking by
+    default, ``?async=1`` (or ``{"async": 1}``) for 202 + job_id with
+    ``/api/stream/<job_id>`` carrying live progress. Runs in the
+    isolated SOCIAL_POOL so a browser collection never holds a generic
+    scan worker. This replaces the old free-form ``/api/social/run``:
+    checks only exist against tracked targets now.
+    """
+    raw = request.get_json(silent=True) or {}
+    data = {k: v for k, v in raw.items() if k != "async"} if isinstance(raw, dict) else {}
+    try:
+        if _social_tracking().get_target(target_id) is None:
+            return jsonify({"error": f"unknown target #{target_id}"}), 404
+    except Exception as exc:
+        return jsonify({"error": runner._safe_error(exc)}), 500
+    return _submit_or_run(runner.check_social_target, target_id, data,
                           pool=runner.SOCIAL_POOL, _data=raw)
 
 
@@ -662,7 +843,7 @@ def api_job_forget(job_id):
 # bounded like the job queue is: past the limit the client gets 429 and
 # falls back to polling /api/job/<id>, which reports the same progress
 # incrementally. Back-pressure, not a hidden thread pile-up.
-_MAX_STREAMS = max(1, int(os.environ.get("SPYGLASS_PRO_MAX_STREAMS", "4")))
+_MAX_STREAMS = runner.env_number("SPYGLASS_PRO_MAX_STREAMS", 4, int, minimum=1)
 _STREAM_LOCK = threading.Lock()
 _ACTIVE_STREAMS = 0
 
@@ -771,9 +952,25 @@ def api_cases_profile():
 
 
 def bind_config():
-    """(host, port, debug) from the environment, with safe defaults."""
+    """(host, port, debug) from the environment, with safe defaults.
+
+    A junk port raises ``ValueError`` with the variable named — the
+    caller (``run``) turns that into a one-line startup error instead of
+    a traceback. Request-time callers (``_allowed_hosts``) catch it and
+    fall back to loopback-only, which is the safe direction.
+    """
     host = os.environ.get("SPYGLASS_PRO_HOST", "127.0.0.1")
-    port = int(os.environ.get("SPYGLASS_PRO_PORT", "5000"))
+    raw_port = os.environ.get("SPYGLASS_PRO_PORT", "5000")
+    try:
+        port = int(str(raw_port).strip())
+    except ValueError:
+        raise ValueError(
+            f"SPYGLASS_PRO_PORT must be an integer (got {raw_port!r})"
+        ) from None
+    if not 1 <= port <= 65535:
+        raise ValueError(
+            f"SPYGLASS_PRO_PORT must be between 1 and 65535 (got {port})"
+        )
     # Werkzeug debug mode ships an interactive traceback console that is
     # effectively arbitrary code execution. Off by default — opt in with
     # SPYGLASS_PRO_DEBUG=1 on a trusted, loopback-only deployment.
@@ -787,15 +984,18 @@ def serve_config():
     server = os.environ.get("SPYGLASS_PRO_SERVER", "auto").strip().lower()
     if server not in ("auto", "flask", "waitress"):
         server = "auto"
-    try:
-        threads = max(1, int(os.environ.get("SPYGLASS_PRO_THREADS", "8")))
-    except ValueError:
-        threads = 8
+    threads = runner.env_number("SPYGLASS_PRO_THREADS", 8, int, minimum=1)
     return host, port, debug, server, threads
 
 
 def run():
-    host, port, debug, server, threads = serve_config()
+    try:
+        host, port, debug, server, threads = serve_config()
+    except ValueError as exc:
+        # A config typo is an operator error, not a crash: name the
+        # variable and exit non-zero instead of dumping a traceback.
+        print(f"Spyglass-Pro: {exc}")
+        raise SystemExit(2) from None
     if os.environ.get("SPYGLASS_PRO_TOKEN"):
         print("Spyglass-Pro: API token authentication enabled")
     elif host.lower() not in ("127.0.0.1", "localhost", "::1"):

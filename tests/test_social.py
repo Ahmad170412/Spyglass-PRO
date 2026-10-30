@@ -535,6 +535,9 @@ class GitHubCollectTest(unittest.TestCase):
         result = self._run([
             (200, dict(GITHUB_PROFILE), {"x-ratelimit-remaining": "58"}),
             (200, GITHUB_REPOS, {"x-ratelimit-remaining": "57"}),
+            # followers=9000 exceeds the walk window (wall, no request);
+            # following=9 is walkable — one short page ends the list.
+            (200, [{"login": "hubot"}], {}),
         ])
         self.assertTrue(result["found"])
         self.assertEqual(result["source"], "api.github.com (keyless)")
@@ -546,8 +549,15 @@ class GitHubCollectTest(unittest.TestCase):
         result = self._run([
             (200, dict(GITHUB_PROFILE), {"x-ratelimit-remaining": "58"}),
             (200, GITHUB_REPOS, {"x-ratelimit-remaining": "57"}),
+            (200, [{"login": "hubot"}], {}),
         ])
         self.assertTrue(any("58/60" in note for note in result["notes"]))
+        # The gated followers list walls with the reason; the walked
+        # following list clears its wall and lands as a real block.
+        self.assertIn("walk window", result["walls"]["followers"]["why"])
+        self.assertNotIn("following", result["walls"])
+        self.assertEqual(result["lists"]["following"]["handles"], ["hubot"])
+        self.assertTrue(result["lists"]["following"]["complete"])
 
     def test_missing_account_is_a_clear_error(self):
         result = self._run([(404, None, {"x-ratelimit-remaining": "59"})])
@@ -586,6 +596,7 @@ class GitHubCollectTest(unittest.TestCase):
                  {"x-ratelimit-remaining": "4998",
                   "x-ratelimit-limit": "5000"}),
                 (200, GITHUB_REPOS, {}),
+                (200, [{"login": "hubot"}], {}),
             ])
         self.assertTrue(any(
             "GitHub budget (GITHUB_TOKEN authenticated): 4998/5000" in n
@@ -598,6 +609,7 @@ class GitHubCollectTest(unittest.TestCase):
         result = self._run([
             (200, renamed, {}),
             (200, [], {}),
+            (200, [{"login": "hubot"}], {}),
         ])
         self.assertTrue(result["found"])
         self.assertTrue(any("renamed" in n for n in result["notes"]))
@@ -608,6 +620,7 @@ class GitHubCollectTest(unittest.TestCase):
         result = self._run([
             (200, dict(GITHUB_PROFILE), {"x-ratelimit-remaining": "58"}),
             (500, None, {}),
+            (200, [{"login": "hubot"}], {}),
         ])
         self.assertTrue(result["found"])
         self.assertTrue(any("repos endpoint failed" in n for n in result["notes"]))
@@ -1022,7 +1035,8 @@ INSTAGRAM_REPORT = {
         "counts": {"followers": 12345, "following": 50, "posts": 10},
     },
     "posts": [{"shortcode": "abc", "url": "https://instagram.com/p/abc",
-               "caption": "hi", "likes": 3, "comment_count": 1}],
+               "caption": "hi", "likes": 3, "comment_count": 1,
+               "media_files": ["output/example/media/abc.jpg"]}],
     "media_files": ["output/example/media/abc.jpg"],
     "followers": [{"username": "a"}],
     "following": [],
@@ -1070,6 +1084,33 @@ class InstagramNormalizeTest(unittest.TestCase):
         self.assertEqual(len(result["posts"]), 1)
         self.assertEqual(result["posts"][0]["url"], "https://instagram.com/p/abc")
         self.assertEqual(result["media_files"], ["output/example/media/abc.jpg"])
+        # The dashboard groups media by post, so the file must stay attached
+        # to the post it came from — a flat list cannot answer that.
+        self.assertEqual(result["posts"][0]["media_files"],
+                         ["output/example/media/abc.jpg"])
+
+    def test_story_capture_is_stored_with_its_file(self):
+        report = dict(INSTAGRAM_REPORT, stories={
+            "count": 2,
+            "items": [
+                {"id": "s1", "taken_at": 1791478000, "expiring_at": 1791564400,
+                 "media_type": 1, "urls": ["https://cdn/expiring?token=x"],
+                 "file": "output/example/media/stories/story_s1.jpg"},
+                {"id": "s2", "taken_at": 1791478100, "media_type": 1,
+                 "urls": ["https://cdn/other"]},
+            ],
+        })
+        result = self._result(report)
+        self.assertEqual(result["stories"]["count"], 2)
+        first, second = result["stories"]["items"]
+        self.assertEqual(first["file"], "output/example/media/stories/story_s1.jpg")
+        self.assertEqual(first["taken_at"], 1791478000)
+        # Expiring CDN URLs are not media evidence; only the local file is.
+        self.assertNotIn("urls", first)
+        self.assertIsNone(second["file"])
+
+    def test_no_story_capture_stays_none(self):
+        self.assertIsNone(self._result()["stories"])
 
     def test_missing_follower_list_is_a_wall_not_an_empty_list(self):
         result = self._result()

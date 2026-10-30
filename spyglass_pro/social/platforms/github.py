@@ -4,12 +4,12 @@
 location, a contact email when the user published one, follower/following
 counts, public repository counts and the account creation date. The
 keyless budget is 60 requests/hour per IP, which is valuable but small,
-so the adapter spends at most two: the profile and the ten most recently
-updated public repositories (mapped onto the schema's ``posts`` list —
-for a GitHub account that *is* the recent activity). Follower/following
-lists exist but are skipped and reported as walls, same policy as the
-other keyless adapters.
-
+so the adapter spends its requests carefully: the profile, one page of
+the forty most recently updated public repositories (mapped onto the
+schema's ``posts`` list — for a GitHub account that *is* the recent
+activity), and — only when the graph fits the walk window — bounded
+walks of the follower/following lists. Bigger accounts keep their walls
+with the reason spelled out rather than silently costing the budget.
 Logins are validated locally before any request: GitHub logins are
 alphanumerics with single interior hyphens, at most 39 characters. A
 malformed target fails without spending budget rather than generating a
@@ -27,6 +27,7 @@ import re as _re
 import httpx
 
 from .. import registry
+from ..lists import RECORD_CAP, record
 from ..schema import add_note, add_wall, set_fields
 
 CAPABILITIES = (
@@ -40,7 +41,9 @@ _TIMEOUT = 20.0
 # Sixty anonymous requests an hour per IP — small enough that every
 # request is accounted for in notes on the result.
 _KEYLESS_LIMIT = 60
-_RECENT_REPOS = 10
+# One page of recent repos — the dashboard's standard 40-item check
+# window. Still a single request (GitHub serves up to 100 per page).
+_RECENT_REPOS = 40
 
 # GitHub usernames: [a-zA-Z0-9], single interior hyphens, 1-39 chars,
 # may not start or end with a hyphen. Enforced locally so a typo'd
@@ -95,8 +98,9 @@ def normalize(profile: dict, result: dict) -> None:
         add_note(result, "organization account, not a personal profile")
     if profile.get("hired"):
         add_note(result, "profile is marked 'available for hire'")
-    # Follower/follow users exist but are list endpoints; counts only, and
-    # the lists are walls like every other keyless adapter's.
+    # Follower/following lists default to walls here (normalize is pure
+    # and offline); a successful walk in collect() clears them via
+    # social/lists.record — same contract as every other adapter.
     add_wall(result, "followers", "followers list",
              "counts only — list endpoints skipped on a keyless pass")
     add_wall(result, "following", "following list",
@@ -234,6 +238,13 @@ def collect(page, cfg, handle: str, result: dict) -> None:
             else:
                 add_note(result, "recent repositories unavailable "
                                  "(repos endpoint failed)")
+            # Graph lists, size-gated: an account bigger than RECORD_CAP
+            # would cost more of the 60/hour budget than a window is
+            # worth — wall it with that reason instead of walking.
+            for kind in ("followers", "following"):
+                _walk_list(client, f"/users/{handle}/{kind}", kind,
+                           result.get("follower_count" if kind == "followers"
+                                      else "following_count"), result)
     except httpx.TimeoutException:
         result["error"] = "api.github.com timed out — retry later"
     except Exception as exc:
@@ -254,6 +265,51 @@ def _get(client: httpx.Client, path: str, params: dict | None = None):
     except Exception:
         return response.status_code, None, lower
     return response.status_code, data, lower
+
+
+def _walk_list(client: httpx.Client, path: str, kind: str, expected, result: dict) -> None:
+    """Walk a list endpoint to RECORD_CAP (or its end), walling failures.
+
+    Page-number pagination, 100 per page; a short page is the end. The
+    size gate up front keeps a 90k-follower account from eating the
+    hourly keyless budget one page at a time.
+    """
+    if isinstance(expected, int) and not isinstance(expected, bool) and expected > RECORD_CAP:
+        record(result, kind, [], None, False,
+               error=f"counts only — {expected:,} exceeds the "
+                     f"{RECORD_CAP}-record walk window")
+        return
+    handles: list[str] = []
+    page = 1
+    exhausted = False
+    error = None
+    max_pages = RECORD_CAP // 100 + 1
+    while len(handles) < RECORD_CAP and page <= max_pages:
+        status, batch, headers = _get(client, path, {"per_page": 100, "page": page})
+        if status in (403, 429):
+            if _remaining(headers) == 0:
+                error = ("walk interrupted — keyless budget exhausted mid-walk "
+                         "(60 requests/hour per IP)")
+            else:
+                error = f"list endpoint answered HTTP {status} mid-walk"
+            break
+        if status == 0:
+            error = "list walk interrupted (network error mid-walk)"
+            break
+        if status != 200 or not isinstance(batch, list):
+            error = f"list endpoint answered HTTP {status}"
+            break
+        if not batch:
+            exhausted = True
+            break
+        for user in batch:
+            if isinstance(user, dict) and user.get("login"):
+                handles.append(str(user["login"]))
+        if len(batch) < 100:
+            exhausted = True
+            break
+        page += 1
+    record(result, kind, handles, expected, exhausted, error=error)
 
 
 platform = registry.register(registry.Platform(

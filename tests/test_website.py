@@ -20,26 +20,6 @@ class SpfTest(unittest.TestCase):
         self.assertIn("_spf.google.com", inc)
 
 
-class CertSpotterTest(unittest.TestCase):
-    def test_filters_to_target_domain(self):
-        data = [{"dns_names": ["example.com", "www.example.com",
-                               "example.edu", "*.cdn.example.com"]}]
-        with mock.patch.object(web, "_http_json", return_value=data):
-            subs = web._certspotter_subs("example.com")
-        self.assertEqual(subs, {"example.com", "www.example.com", "cdn.example.com"})
-
-    def test_non_json_response(self):
-        with mock.patch.object(web, "_http_json", return_value=None):
-            self.assertEqual(web._certspotter_subs("example.com"), set())
-
-    def test_skips_non_dict_entries(self):
-        data = [{"dns_names": ["www.example.com"]}, "garbage",
-                {"dns_names": ["cdn.example.com"]}]
-        with mock.patch.object(web, "_http_json", return_value=data):
-            subs = web._certspotter_subs("example.com")
-        self.assertEqual(subs, {"www.example.com", "cdn.example.com"})
-
-
 class CrtSubsTest(unittest.TestCase):
     def test_multiline_name_value(self):
         data = [{"name_value": "example.com\n*.example.com\nwww.example.com\nother.org"}]
@@ -51,24 +31,6 @@ class CrtSubsTest(unittest.TestCase):
         data = [{"name_value": "www.example.com"}, "garbage"]
         with mock.patch.object(web, "_http_json", return_value=data):
             self.assertEqual(web._crt_subs("example.com"), {"www.example.com"})
-
-
-class WaybackCdxTest(unittest.TestCase):
-    def test_parses_rows_and_filters_hosts(self):
-        data = [
-            ["timestamp", "original", "statuscode"],
-            ["20200101", "https://example.com/", "200"],
-            ["20210101", "https://www.example.com/x", "200"],
-            ["20220101", "https://other.com/", "200"],
-        ]
-        with mock.patch.object(web, "_http_json", return_value=data):
-            out = web._wayback_cdx("example.com")
-        self.assertEqual(out["first"], "20200101")
-        self.assertEqual(out["last"], "20220101")
-        self.assertEqual(out["count"], 3)
-        self.assertIn("example.com", out["subs"])
-        self.assertIn("www.example.com", out["subs"])
-        self.assertNotIn("other.com", out["subs"])
 
 
 class MemoizationTest(unittest.TestCase):
@@ -198,7 +160,7 @@ class PhaseWhoisTest(unittest.TestCase):
 
 
 class PhaseDnsTest(unittest.TestCase):
-    def test_collects_ips_and_records(self):
+    def test_collects_records(self):
         def fake_dig(*args, **kwargs):
             return {"A": "1.2.3.4", "AAAA": "", "MX": "10 mail.x.com."}.get(args[1], "")
         with mock.patch.object(web, "_DIG", "/usr/bin/dig"), \
@@ -207,7 +169,10 @@ class PhaseDnsTest(unittest.TestCase):
              mock.patch.object(web, "_is_wildcard", return_value=(False, "")):
             out = web._phase_dns("x.com")
         self.assertEqual(out["dns_records"]["A"], "1.2.3.4")
-        self.assertEqual(out["_ips"], {"1.2.3.4"})
+        self.assertEqual(out["dns_records"]["MX"], "10 mail.x.com.")
+        # The internal keys the removed heavy phases used to read are gone.
+        for key in ("_ips", "_wild", "_wild_ip"):
+            self.assertNotIn(key, out)
 
 
 class LightCollectTest(unittest.TestCase):

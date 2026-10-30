@@ -24,6 +24,7 @@ import re as _re
 import httpx
 
 from .. import registry
+from ..lists import RECORD_CAP, record
 from ..schema import add_note, add_wall, set_fields
 
 CAPABILITIES = (
@@ -44,6 +45,7 @@ _UA = (
 _WS_RE = _re.compile(r"\s+")
 _TAG_RE = _re.compile(r"<[^>]+>")
 _HREF_RE = _re.compile(r'href\s*=\s*"([^"]+)"')
+_LINK_NEXT_RE = _re.compile(r'<([^>]+)>;\s*rel="next"')
 
 
 def _text(value) -> str:
@@ -201,6 +203,11 @@ def collect(page, cfg, handle: str, result: dict) -> None:
                 normalize_posts(statuses, result)
             else:
                 add_note(result, "recent posts unavailable (statuses endpoint failed)")
+            # Graph lists: keyless on open instances, Link pagination up to
+            # RECORD_CAP; failures wall the gap (social/lists.py owns the
+            # completeness verdict).
+            for kind in ("followers", "following"):
+                _walk_list(client, home, str(account["id"]), kind, result)
     except httpx.TimeoutException:
         result["error"] = "mastodon instance timed out — retry later"
     except Exception as exc:
@@ -232,7 +239,7 @@ def _statuses(client: httpx.Client, host: str, account_id: str):
     try:
         response = client.get(
             f"https://{host}/api/v1/accounts/{account_id}/statuses",
-            params={"limit": 12, "exclude_reblogs": "true"},
+            params={"limit": 40, "exclude_reblogs": "true"},
         )
     except Exception:
         return None
@@ -243,6 +250,66 @@ def _statuses(client: httpx.Client, host: str, account_id: str):
     except Exception:
         return None
     return data if isinstance(data, list) else None
+
+
+def _next_link(header: str) -> str:
+    """The rel=\"next\" URL inside a Link header, or '' when absent.
+
+    Mastodon paginates its list endpoints with Link headers (max_id
+    paging), never with a JSON cursor — so a walk that stops before the
+    header says so has not finished the list.
+    """
+    match = _LINK_NEXT_RE.search(header or "")
+    return match.group(1) if match else ""
+
+
+def _walk_list(client: httpx.Client, host: str, account_id: str, kind: str, result: dict) -> None:
+    """Follow Link pagination up to RECORD_CAP records, walling failures.
+
+    Exhaustion (no next link, or an empty page) is what lets the block
+    call itself complete; hitting the cap first leaves it a window.
+    """
+    expected = result.get("follower_count" if kind == "followers" else "following_count")
+    url = f"https://{host}/api/v1/accounts/{account_id}/{kind}"
+    handles: list[str] = []
+    exhausted = False
+    error = None
+    pages = 0
+    while pages < 50 and len(handles) < RECORD_CAP:
+        try:
+            response = client.get(url, params={"limit": 80} if pages == 0 else None)
+        except Exception:  # a dead page walls the list, not the run
+            error = "list walk interrupted (network error mid-walk)"
+            break
+        if response.status_code in (401, 403):
+            error = "this instance requires a login for the list endpoint"
+            break
+        if response.status_code != 200:
+            error = f"list endpoint answered HTTP {response.status_code}"
+            break
+        try:
+            batch = response.json()
+        except Exception:  # unreadable JSON is a wall, not a crash
+            error = "list endpoint returned unreadable JSON"
+            break
+        if not isinstance(batch, list):
+            error = "unexpected list response from the instance"
+            break
+        if not batch:
+            exhausted = True
+            break
+        for account in batch:
+            if isinstance(account, dict):
+                name = account.get("acct") or account.get("username")
+                if name:
+                    handles.append(str(name))
+        pages += 1
+        next_url = _next_link(response.headers.get("Link", ""))
+        if not next_url:
+            exhausted = True
+            break
+        url = next_url
+    record(result, kind, handles, expected, exhausted, error=error)
 
 
 platform = registry.register(registry.Platform(

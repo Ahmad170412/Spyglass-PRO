@@ -16,7 +16,8 @@ from __future__ import annotations
 import time
 
 from .. import registry
-from ..schema import add_note, add_wall, set_fields
+from ..lists import record as record_list
+from ..schema import add_note, set_fields
 
 # What this platform can actually return, from the engine's own feature set.
 CAPABILITIES = (
@@ -75,27 +76,68 @@ def normalize(report: dict, result: dict) -> None:
             "comments": post.get("comment_count"),
             "timestamp": post.get("timestamp"),
             "location": (post.get("location") or {}).get("name"),
+            # Keep each post's downloaded files beside the post itself. A
+            # flat media list cannot answer "which images belong to this
+            # post", and the dashboard's per-check media view needs exactly
+            # that. Older snapshots simply have no key.
+            "media_files": [str(f) for f in (post.get("media_files") or []) if f],
         }
         for post in posts if isinstance(post, dict)
     ]
     result["media_files"] = list(report.get("media_files") or [])
 
+    # Story tray capture. The engine hands back {"count", "items"}; store
+    # the metadata the dashboard can render later (the CDN URLs expire, so
+    # only the local file path is worth keeping). None means "stories were
+    # not captured this check", not "this account had none".
+    stories = report.get("stories")
+    if isinstance(stories, dict):
+        items = []
+        for item in stories.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            items.append({
+                "id": item.get("id"),
+                "taken_at": item.get("taken_at"),
+                "expiring_at": item.get("expiring_at"),
+                "media_type": item.get("media_type"),
+                "file": item.get("file") or None,
+            })
+        result["stories"] = {"count": stories.get("count", len(items)),
+                             "items": items}
+    elif stories is not None:
+        result["stories"] = None
+
     for kind, key in (("followers", "followers"), ("following", "following")):
-        retrieved = report.get(key) or []
-        skipped = report.get(f"{key}_skipped") or report.get("lists_skipped")
-        if skipped and not retrieved:
-            add_wall(result, kind, f"{kind} list", "login-walled — a burner login unlocks it")
-        elif not retrieved:
-            add_wall(result, kind, f"{kind} list", "not retrievable for this account")
+        # build_report hands back {count, collected, walled, usernames};
+        # a bare list is the shape the offline fixtures (and older
+        # reports) use. Reading the dict as a list counted its own four
+        # keys — every note said "4 followers retrieved".
+        block = report.get(key)
+        if isinstance(block, dict):
+            retrieved = block.get("usernames") or []
+            walled = bool(block.get("walled"))
         else:
-            # Retrieved lists are summarised, not embedded: a 200-entry list
-            # would bloat every stored case. A partial list (Instagram's
-            # logged-out modal shows a sample) is labelled as partial, because
-            # "5 of 686M" and "686M followers" are different findings.
-            partial = bool(skipped)
-            result.setdefault("metrics", {})[f"{key}_retrieved"] = len(retrieved)
-            add_note(result, f"{len(retrieved)} {kind} retrieved"
-                             + (" (partial — the rest is login-walled)" if partial else ""))
+            retrieved = block or []
+            walled = False
+        skipped = bool(report.get(f"{key}_skipped") or report.get("lists_skipped"))
+        expected = result.get("follower_count" if key == "followers" else "following_count")
+        handles = [u.get("username") if isinstance(u, dict) else u for u in retrieved]
+        handles = [h for h in handles if h]
+        if not handles:
+            why = ("login-walled — a burner login unlocks it"
+                   if (skipped or walled) else "not retrievable for this account")
+            record_list(result, kind, [], expected, False, error=why)
+            continue
+        # The modal is a sample (the engine's max_followers window, with
+        # no proof the list ended), so exhausted=False: lists.record keeps
+        # it incomplete unless the walk reached the profile counter — and
+        # "5 of 686M" stays a labelled partial, never a bare number.
+        record_list(result, kind, handles, expected, False)
+        partial = bool(skipped or walled)
+        result.setdefault("metrics", {})[f"{key}_retrieved"] = len(handles)
+        add_note(result, f"{len(handles)} {kind} retrieved"
+                         + (" (partial — the rest is login-walled)" if partial else ""))
 
     if report.get("contacts"):
         result["contacts"] = report["contacts"]
@@ -158,7 +200,10 @@ def collect(page, cfg, handle: str, result: dict) -> None:
 
     stories = None
     if logged_in and profile.get("id"):
-        stories = collect_stories(page, str(profile["id"]), media_dir, deep)
+        # "Download Media" is the dashboard's explicit yes to keeping files;
+        # deep mode implied it before this flag existed. Honour either.
+        stories = collect_stories(page, str(profile["id"]), media_dir,
+                                  bool(deep or cfg.get("download_media")))
         if not (stories and stories.get("count")):
             notes.append("stories unavailable (API blocked or no active stories)")
 

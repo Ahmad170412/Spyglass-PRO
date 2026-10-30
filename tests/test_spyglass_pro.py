@@ -22,6 +22,7 @@ import helpers  # noqa: F401  — puts spyglass_pro/modules on sys.path
 
 from spyglass_pro import runner
 from spyglass_pro.app import _mask_proxy, _validate_proxy, app, bind_config
+from spyglass_pro.app import run as app_run
 
 
 class ProxyValidationTest(unittest.TestCase):
@@ -51,6 +52,17 @@ class ProxyValidationTest(unittest.TestCase):
         self.assertIsNone(_validate_proxy("http://"))
         self.assertIsNone(_validate_proxy("socks5://:9050"))
 
+    def test_rejects_malformed_ports(self):
+        """urlparse does not validate ports — ``.port`` raises later.
+
+        A proxy with "host:abc" used to pass validation, land in the
+        environment, and then 500 every endpoint that masks it back.
+        """
+        for url in ("http://h:abc", "http://user:pass@h:abc",
+                    "http://user:pass@h:99999", "socks5://h:-1",
+                    "http://h:0"):
+            self.assertIsNone(_validate_proxy(url), url)
+
 
 class TokenGateTest(unittest.TestCase):
     def setUp(self):
@@ -78,8 +90,18 @@ class TokenGateTest(unittest.TestCase):
 
     def test_wrong_token_rejected(self):
         with mock.patch.dict(os.environ, {"SPYGLASS_PRO_TOKEN": "s3cret"}):
-            self.assertEqual(
-                self.client.get("/api/status?token=wrong").status_code, 401)
+            self.assertEqual(self.client.get("/api/status?token=wrong").status_code, 401)
+
+    def test_query_token_never_becomes_a_module_flag(self):
+        """``?token=`` is an auth channel — it must not ride into the
+        engine, where a flag consumer could echo it into a result."""
+        with mock.patch.dict(os.environ, {"SPYGLASS_PRO_TOKEN": "s3cret"}), \
+             mock.patch.object(runner, "run_spyglass",
+                               return_value={"ok": True}) as run:
+            resp = self.client.get(
+                "/api/spyglass/run?module=website&target=example.com&token=s3cret")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(run.call_args[0][2], {})
 
     def test_html_shell_stays_ungated(self):
         """The shell must load so the JS can prompt for the token."""
@@ -100,6 +122,33 @@ class BindConfigTest(unittest.TestCase):
     def test_debug_is_opt_in(self):
         with mock.patch.dict(os.environ, {"SPYGLASS_PRO_DEBUG": "1"}):
             self.assertTrue(bind_config()[2])
+
+    def test_junk_port_is_a_named_error_not_a_traceback(self):
+        for junk in ("abc", "", "5000x", "99999", "-1"):
+            with mock.patch.dict(os.environ, {"SPYGLASS_PRO_PORT": junk}):
+                with self.assertRaises(ValueError) as ctx:
+                    bind_config()
+            self.assertIn("SPYGLASS_PRO_PORT", str(ctx.exception), junk)
+
+    def test_run_exits_cleanly_on_a_junk_port(self):
+        """A config typo is an operator error: one line, non-zero exit."""
+        with mock.patch.dict(os.environ, {"SPYGLASS_PRO_PORT": "abc"}), \
+             mock.patch("builtins.print"):
+            with self.assertRaises(SystemExit) as ctx:
+                app_run()
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_env_number_falls_back_on_junk(self):
+        """An optional tuning knob must not crash the server at import."""
+        with mock.patch.dict(os.environ, {"SPYGLASS_TEST_JUNK": "lots"}):
+            self.assertEqual(
+                runner.env_number("SPYGLASS_TEST_JUNK", 16, int, minimum=1), 16)
+        with mock.patch.dict(os.environ, {"SPYGLASS_TEST_JUNK": "7"}):
+            self.assertEqual(
+                runner.env_number("SPYGLASS_TEST_JUNK", 16, int, minimum=1), 7)
+        with mock.patch.dict(os.environ, {"SPYGLASS_TEST_JUNK": "0"}):
+            self.assertEqual(
+                runner.env_number("SPYGLASS_TEST_JUNK", 16, int, minimum=1), 1)
 
 
 class JobPoolTest(unittest.TestCase):
@@ -152,7 +201,7 @@ class TargetValidationTest(unittest.TestCase):
     """
 
     def test_overlong_targets_are_rejected(self):
-        for module in ("website", "email", "phone", "username", "darkweb", "ip"):
+        for module in ("website", "email", "phone", "username", "darkweb"):
             err = runner._validate_target(module, "a" * 700)
             self.assertIsNotNone(err, f"{module} accepted a 700-character target")
             self.assertIn("too long", err)
@@ -164,7 +213,7 @@ class TargetValidationTest(unittest.TestCase):
                                  f"accepted {junk!r}")
 
     def test_empty_target_rejected_where_it_would_query_nothing(self):
-        for module in ("website", "email", "phone", "username", "darkweb", "ip"):
+        for module in ("website", "email", "phone", "username", "darkweb"):
             err = runner._validate_target(module, "")
             self.assertIsNotNone(err)
             self.assertIn("required", err)
@@ -183,22 +232,6 @@ class TargetValidationTest(unittest.TestCase):
         self.assertIsNotNone(err)
         self.assertIn("too long", err)
 
-    def test_ip_module_requires_an_ip(self):
-        for junk in ("not-an-ip", "999.999.999.999", "example.com"):
-            self.assertIsNotNone(runner._validate_target("ip", junk))
-        self.assertIsNone(runner._validate_target("ip", "8.8.8.8"))
-        self.assertIsNone(runner._validate_target("ip", "2001:4860:4860::8888"))
-
-    def test_ip_module_accepts_ipv6_literals(self):
-        for good in ("::1", "2001:4860:4860::8888", "fe80::abcd"):
-            self.assertIsNone(runner._validate_target("ip", good), good)
-
-    def test_ip_module_rejects_malformed_ipv6(self):
-        # A colon used to be sufficient ("gggg::1" was accepted and then
-        # always failed at resolve time); only a real address passes now.
-        for junk in (":", "2001:db8:::1", "12345::", "gggg::1", "::gggg"):
-            self.assertIsNotNone(runner._validate_target("ip", junk), junk)
-
     def test_legitimate_targets_are_accepted(self):
         """The gate must not break real recon input."""
         valid = [
@@ -210,7 +243,6 @@ class TargetValidationTest(unittest.TestCase):
             ("phone", "555-123-4567"),
             ("username", "torproject"),
             ("username", "some_user.name-1"),
-            ("ip", "8.8.8.8"),
             ("darkweb", "example.com"),
         ]
         for module, target in valid:
@@ -453,23 +485,6 @@ class StoredRunFeedbackTest(unittest.TestCase):
         self.assertIn("stored_run_id", result)
         self.assertEqual(result["stored_run_id"], 1)
 
-    def test_lens_run_reports_stored_run_id(self):
-        from lens_extender import analyzer
-        from lens_extender import osint as le_osint
-
-        class FakeResult:
-            resolved_ip = "1.1.1.1"
-            domain = "example.com"
-            reverse_dns = "host.example.com"
-            errors = []
-
-        with mock.patch.object(le_osint, "gather", return_value=FakeResult()), \
-             mock.patch.object(analyzer, "build_report",
-                               return_value={"resolved_ip": "1.1.1.1"}) as build:
-            result = runner.run_lens("1.1.1.1", {"store": "1"})
-        self.assertTrue(build.called)
-        self.assertEqual(result.get("stored_run_id"), 1, result)
-
     def test_investigation_reports_stored_run_id(self):
         from spyglass_osint import investigation
         with mock.patch.object(investigation, "investigate",
@@ -695,7 +710,7 @@ class SettingsSaveTest(unittest.TestCase):
         self.assertFalse(key["configured"])
 
     def test_settings_offers_only_the_keys_an_exposed_module_reads(self):
-        """The dormant IP/Lens API keys are not part of this build's vault."""
+        """The removed IP/Lens API keys are not part of this build's vault."""
         snap = self.client.get("/api/settings").get_json()
         keys = {k["key"] for k in snap["keys"]}
         self.assertEqual(keys, {"intelx_api_key", "hibp_api_key"})
@@ -932,6 +947,31 @@ class ProxyMaskingTest(unittest.TestCase):
         self.assertEqual(_mask_proxy("socks5://127.0.0.1:9050"),
                          "socks5://127.0.0.1:9050")
         self.assertEqual(_mask_proxy(""), "")
+
+    def test_mask_never_raises_on_a_malformed_port(self):
+        """``.port`` raises on "host:abc" — masking runs on /api/status,
+        so a bad value in the environment must not 500 the dashboard."""
+        self.assertEqual(_mask_proxy("http://alice:s3cr3t@host:abc"),
+                         "http://••••@host")
+        self.assertEqual(_mask_proxy("http://alice:s3cr3t@host:99999"),
+                         "http://••••@host")
+        self.assertEqual(_mask_proxy("http://alice:s3cr3t@host:8080"),
+                         "http://••••@host:8080")
+
+    def test_proxy_post_rejects_a_malformed_port(self):
+        with mock.patch.dict(os.environ, {}):
+            os.environ.pop("SPYGLASS_PROXY", None)
+            resp = self.client.post("/api/proxy",
+                                    json={"proxy": "http://u:p@h:abc"})
+            self.assertEqual(resp.status_code, 400)
+            self.assertNotIn("SPYGLASS_PROXY", os.environ)
+
+    def test_status_survives_a_hostile_env_proxy(self):
+        """Even a hand-edited environment must not break the status page."""
+        with mock.patch.dict(os.environ,
+                             {"SPYGLASS_PROXY": "http://u:p@h:abc"}):
+            resp = self.client.get("/api/status")
+        self.assertEqual(resp.status_code, 200)
 
     def test_status_never_echoes_the_credential(self):
         with mock.patch.dict(os.environ, {"SPYGLASS_PROXY": self.CREDS}):

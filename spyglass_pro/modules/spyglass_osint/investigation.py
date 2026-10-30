@@ -226,8 +226,8 @@ def _collect_entities(results, entities):
                 entities["ips"].add(ip)
 
         # Light-recon additions: certificate-transparency names and the
-        # domains named by SPF. The heavy subdomain/TLS/CSP keys are dormant
-        # in 1.3 and no longer read here.
+        # domains named by SPF. The heavy subdomain/TLS/CSP keys were
+        # deleted with the rest of the infra work and never read here.
         for d in wr.get("ct", []) or []:
             d = str(d).strip().lower().rstrip(".")
             if d and "." in d:

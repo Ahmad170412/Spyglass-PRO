@@ -42,9 +42,9 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from urllib.parse import urlsplit
 
-# The three tools use relative imports internally (except lens_extender,
-# which uses absolute `lens_extender.*` imports), so they must be
-# importable as top-level packages.
+# The engines use relative imports internally (except lens_extender,
+# whose surviving case store is imported as the absolute
+# `lens_extender.store`), so they must be importable as top-level packages.
 MODULES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules")
 if MODULES_DIR not in sys.path:
     sys.path.insert(0, MODULES_DIR)
@@ -66,6 +66,24 @@ if _SCRIPTS_DIR and os.path.isdir(_SCRIPTS_DIR):
 # collection. Extra requests queue here instead of piling up work.
 JOB_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="spyglass-job")
 
+
+def env_number(name, default, cast=float, minimum=None):
+    """Read a numeric tuning knob from the environment, safely.
+
+    These knobs are optional: a typo'd ``SPYGLASS_PRO_MAX_QUEUE=lots``
+    used to raise ValueError at import time and take the whole server
+    down over a setting whose default was always fine. Junk now falls
+    back to the default; ``minimum`` clamps a value that is valid but
+    nonsensical (a queue cap of 0 would reject every job).
+    """
+    try:
+        value = cast(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and value < minimum:
+        return minimum
+    return value
+
 # Dedicated single worker for browser-driven social collection. The social
 # harness serializes on its own lock already; giving it its own queue
 # keeps a long Instagram collection from starving the 3 generic workers,
@@ -76,11 +94,11 @@ SOCIAL_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="spyglass-soc
 # worst) must not pile up unboundedly — a client that fires many
 # requests gets rejected once the pending queue is full instead of
 # stalling the whole server behind a mountain of scans.
-MAX_QUEUE = max(1, int(os.environ.get("SPYGLASS_PRO_MAX_QUEUE", "16")))
+MAX_QUEUE = env_number("SPYGLASS_PRO_MAX_QUEUE", 16, int, minimum=1)
 # Wall-clock budget per job. The underlying future keeps running
 # (it cannot be cancelled mid-scan), but the requester is not held
 # hostage by a hung scan.
-JOB_TIMEOUT = float(os.environ.get("SPYGLASS_PRO_JOB_TIMEOUT", "900"))
+JOB_TIMEOUT = env_number("SPYGLASS_PRO_JOB_TIMEOUT", 900.0, float)
 
 _JOB_LOCK = threading.Lock()
 _PENDING = 0
@@ -161,7 +179,7 @@ def run_job(fn, *args, **kwargs):
 
 _ASYNC_LOCK = threading.Lock()
 _ASYNC_JOBS: dict = {}
-_ASYNC_MAX_JOBS = max(1, int(os.environ.get("SPYGLASS_PRO_MAX_JOBS", "200")))
+_ASYNC_MAX_JOBS = env_number("SPYGLASS_PRO_MAX_JOBS", 200, int, minimum=1)
 _ASYNC_TTL = float(os.environ.get("SPYGLASS_PRO_JOB_TTL", "3600"))
 
 # One condition over the job registry: progress pushers and finished-job
@@ -427,14 +445,6 @@ def _sg_darkweb(target, flags, progress):
                    "darkweb", target, flags, progress)
 
 
-def _sg_ip(target, flags, progress):
-    try:
-        from spyglass_osint import ip as mod
-    except ImportError as exc:
-        return {"error": f"ip module unavailable: {exc}"}
-    return _finish(mod.address(target), "ip", target, flags, progress)
-
-
 def _sg_opsec(target, flags, progress):
     try:
         from spyglass_osint import opsec as mod
@@ -458,7 +468,6 @@ _SPYGLASS_HANDLERS = {
     "phone": _sg_phone,
     "website": _sg_website,
     "darkweb": _sg_darkweb,
-    "ip": _sg_ip,
     "opsec": _sg_opsec,
     "metadata": _sg_metadata,
 }
@@ -609,11 +618,6 @@ def _validate_target(module, target):
         return (f"{module}: target is too long ({len(target)} characters, "
                 f"maximum {MAX_TARGET_LEN})")
 
-    if module == "ip":
-        if not _is_ip_literal(target):
-            return f"ip: {target!r} is not an IP address"
-        return None
-
     if module == "website":
         # Domain-only: a direct IP is not a website target.
         host = _website_host(target)
@@ -748,19 +752,6 @@ def _spyglass_summary(qtype, target, result):
         ct = result.get("ct") or []
         detail = (f"{len(ct)} CT name(s), owner/WHOIS/DNS"
                   if ct else "owner/WHOIS/DNS recon complete")
-    elif qtype == "ip":
-        parts = []
-        ports = result.get("open_ports") or []
-        if ports:
-            parts.append(f"{len(ports)} open port(s)")
-        geo = result.get("geo")
-        if isinstance(geo, dict):
-            loc = geo.get("city") or geo.get("country") or geo.get("Country")
-            if loc:
-                parts.append(str(loc))
-        elif isinstance(geo, str) and geo:
-            parts.append(geo)
-        detail = ", ".join(parts)
     elif qtype == "darkweb":
         hits = len(result.get("ahmia") or [])
         detail = f"{hits} dark-web hit(s)" if hits else "no dark-web hits"
@@ -771,104 +762,6 @@ def _spyglass_summary(qtype, target, result):
         detail = f"{len(recs)} recommendation(s)" if recs else "no issues detected"
 
     base = f"{qtype.capitalize()} recon for {target}"
-    return f"{base} — {detail}" if detail else base
-
-
-# ─── Lens-Extender ─────────────────────────────────────────────
-
-def run_lens(target, flags):
-    """Run Lens-Extender passive recon (Shodan, InternetDB, RDAP, …)."""
-    flags = flags or {}
-    target = (target or "").strip()
-    if not target:
-        return {"error": "target required"}
-    # Lens targets are IPs or domains; the same junk-input problem applies.
-    if not _is_identifier(target):
-        return {"error": f"lens: {target!r} is not a valid IP or domain target"}
-    progress = Progress()
-
-    try:
-        from lens_extender import analyzer as le_analyzer
-        from lens_extender import config as le_config
-        from lens_extender import osint as le_osint
-        from lens_extender import store as le_store
-    except ImportError as exc:
-        return {"error": f"Lens-Extender unavailable: {exc} (pip install httpx)"}
-
-    cfg = le_config.load()
-
-    progress.add(f"starting lens-extender recon for {target}")
-
-    def log_cb(line):
-        # Log lines carry rich markup like "[green]GeoIP[/green] lookup OK".
-        text = re.sub(r"\[/?[^\]]+\]", "", str(line)).strip()
-        progress.add(text)
-
-    try:
-        osint_result = le_osint.gather(target, cfg, log_cb)
-    except ValueError as exc:
-        # Unresolvable domains raise ValueError with a clean message.
-        return {"error": _safe_error(exc)}
-    except Exception as exc:
-        return {"error": f"passive recon failed: {_safe_error(exc)}"}
-
-    # Passive only: no scan_result, so the analyzer builds its port view
-    # purely from Shodan and InternetDB. The active nmap path was removed
-    # from this package.
-    scan_type = "passive"
-    try:
-        report = le_analyzer.build_report(target, osint_result, None)
-    except Exception as exc:
-        return {"error": f"report build failed: {_safe_error(exc)}"}
-    progress.add("lens-extender passive recon complete")
-
-    stored_run_id = None
-    if flags.get("store"):
-        le_store.store_scan(target, report, scan_type=scan_type)
-        stored_run_id = _lens_last_scan_id(target)
-
-    response = dict(report) if isinstance(report, dict) else {"report": report}
-    if stored_run_id:
-        response["stored_run_id"] = stored_run_id
-    response["progress"] = progress.lines
-    response["summary"] = _lens_summary(report, target)
-    _attach_facts(response, "lens", target)
-    return response
-
-
-def _lens_last_scan_id(target):
-    """Row id of the scan just written, so the UI can refresh the case list."""
-    try:
-        from lens_extender import store as le_store
-        conn = le_store._get_conn()
-    except Exception:
-        return None
-    try:
-        row = conn.execute(
-            "SELECT id FROM scans WHERE target=? ORDER BY id DESC LIMIT 1", (target,)
-        ).fetchone()
-        return row["id"] if row else None
-    except Exception:
-        return None
-    finally:
-        conn.close()
-
-
-def _lens_summary(report, target):
-    if not isinstance(report, dict):
-        return f"Lens scan of {target} complete"
-    parts = []
-    ip = report.get("resolved_ip")
-    if ip:
-        parts.append(f"resolves to {ip}")
-    ports = report.get("ports") or []
-    if ports:
-        parts.append(f"{len(ports)} open port(s)")
-    vulns = report.get("vulns") or []
-    if vulns:
-        parts.append(f"{len(vulns)} vuln(s)")
-    detail = ", ".join(parts)
-    base = f"Lens scan of {target} complete"
     return f"{base} — {detail}" if detail else base
 
 
@@ -912,8 +805,8 @@ def run_investigate(payload):
         return {"error": f"investigation failed: {_safe_error(exc)}"}
 
     # Optional cross-tool leg: a social profile through the shared
-    # harness. IP recon no longer reaches this path — Lens is dormant in
-    # 1.3 and `ip` is not an investigation input.
+    # harness. The removed IP/Lens engines never reach this path — `ip`
+    # is not an investigation input.
     insta_target = (payload.get("insta") or "").strip()
     if insta_target:
         result["social"] = run_social("instagram", insta_target, {}, progress=progress)
@@ -1075,6 +968,66 @@ def run_social(platform, handle, payload, progress=None):
     return response
 
 
+def check_social_target(target_id, payload=None, progress=None):
+    """One CHECK AGAIN pass against a tracked target: collect → diff → record.
+
+    The target flow replaces the old ad-hoc ``/api/social/run``: a check
+    always belongs to a tracked (platform, handle), so the first
+    successful run pins the baseline (the diff refuses with "this run is
+    the baseline"), every later run reports what changed since the last
+    *successful* check, and a failed run updates bookkeeping only —
+    ``social.tracking`` never lets a blip write a snapshot or move the
+    baseline.
+
+    Returns the normalized payload plus:
+
+    * ``target``  — the updated target row (checks, baseline, status);
+    * ``diff``    — ``social.diff``'s verdict, refusal included;
+    * ``first``   — whether no baseline existed before this check.
+    """
+    payload = payload or {}
+    own_progress = progress is None
+    progress = progress if progress is not None else Progress()
+
+    from spyglass_pro.social import tracking
+    from spyglass_pro.social.diff import diff as diff_payloads
+
+    target = tracking.get_target(target_id)
+    if target is None:
+        return {"error": f"unknown target #{target_id}"}
+    platform, handle = target["platform"], target["handle"]
+
+    progress.add(f"checking {platform} @{handle} "
+                 f"(target #{target_id}, {target['checks']} check(s) so far)")
+    # Read the previous snapshot BEFORE collecting, so the diff is against
+    # the state the operator last saw, not against this run's own write.
+    previous = tracking.latest_snapshot(target_id)
+
+    result = run_social(platform, handle, payload, progress=progress)
+    failed = bool(result.get("error")) or not result.get("found")
+
+    if failed:
+        reason = result.get("error") or (
+            f"no {platform} profile found for @{handle}")
+        updated = tracking.record_check(target_id, None, status="error", error=reason)
+        comparison = {"ok": False, "changed": False,
+                      "error": f"check failed: {reason}"[:300]}
+    else:
+        status = "partial" if result.get("partial") else "ok"
+        updated = tracking.record_check(target_id, result, status=status)
+        # previous=None refuses with the baseline wording — correct: this
+        # run just became the baseline.
+        comparison = diff_payloads(previous, result)
+
+    response = dict(result)
+    response["target"] = updated
+    response["diff"] = comparison
+    response["first"] = previous is None
+    if own_progress:
+        response["progress"] = progress.lines
+    return response
+
+
 # ─── Case history (both tools' SQLite stores) ──────────────────
 
 def list_cases(limit=200):
@@ -1118,6 +1071,12 @@ def _spyglass_cases(limit):
 
 
 def _lens_cases(limit):
+    """Legacy Lens runs from the surviving case store.
+
+    Lens-Extender's recon engine was deleted; only its SQLite store
+    remains, so runs written by an older build still list here and can
+    still be deleted. Nothing in this build can write a new one.
+    """
     try:
         from lens_extender import store as le_store
         conn = le_store._get_conn()
@@ -1142,7 +1101,8 @@ def _lens_cases(limit):
 def delete_case(run_id, qtype=""):
     """Delete one stored run (plus its entity index rows) by id.
 
-    ``qtype`` picks the store: ``lens_*`` lives in the Lens scans table,
+    ``qtype`` picks the store: ``lens_*`` lives in the surviving Lens
+    case store (legacy rows only — the engine itself is gone),
     everything else in the spyglass runs/entities tables. Done in the
     merge layer so the vendored engines stay untouched — same pattern as
     the list helpers above. Without this the case table only grows.

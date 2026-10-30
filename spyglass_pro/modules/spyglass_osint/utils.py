@@ -109,7 +109,6 @@ if not _BB:
 _DIG = shutil.which("dig")
 _WHOIS = shutil.which("whois")
 _CURL = shutil.which("curl")
-_SHODAN = shutil.which("shodan")
 _EXIFTOOL = shutil.which("exiftool")
 
 
@@ -119,12 +118,11 @@ def retry_call(fn, attempts=3, base_delay=1.0, max_delay=8.0):
     """Call ``fn`` until it returns something truthy, backing off between tries.
 
     Every passive source this engine uses is a free third-party endpoint:
-    crt.sh, CertSpotter, HackerTarget, Wayback CDX, ip-api, RDAP, RIPEstat.
+    crt.sh, CertSpotter, HackerTarget and ip-api.
     They rate-limit hard, and several 5xx under load. With a single attempt
     one 429 or one blip silently removes that source from the result — the
     scan still "succeeds", just with less in it, which is the worst way to
-    lose data. `lens_extender/osint.py::_get` already retries the same
-    endpoints with backoff; this keeps the two engines degrading alike.
+    lose data.
 
     Only for idempotent GETs against third-party APIs — never for anything
     that touches the target's own network. Returns the first truthy result,

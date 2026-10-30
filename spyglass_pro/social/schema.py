@@ -55,7 +55,16 @@ def new_result(platform: str, handle: str) -> dict:
         "walls": {},
         "posts": [],
         "media_files": [],
+        # Story-tray capture for one check: None = not attempted/unavailable,
+        # a dict = {"count", "items"}. Snapshots written before story capture
+        # existed have no key at all, which is how the dashboard tells "not
+        # captured then" from "no active stories that day".
+        "stories": None,
         "entities": {},
+        # Follower/following windows: {kind: {handles, complete, expected,
+        # order, limit}} — built only by collectors that actually walked a
+        # list endpoint; completeness follows social/lists.py's rule.
+        "lists": {},
     }
     for field in PROFILE_FIELDS:
         result[field["key"]] = [] if field["type"] == "list" else None

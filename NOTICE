@@ -1,8 +1,9 @@
 Spyglass-Pro
 Copyright (c) 2026 TeamLeader. Licensed under the MIT License; see LICENSE.
 
-This tree also contains three engine packages under spyglass_pro/modules/,
-authored by the same copyright holder and covered by that same MIT license.
+This tree also contains three engine packages under spyglass_pro/modules/
+(`lens_extender` now carries its case store only — see below), authored by
+the same copyright holder and covered by that same MIT license.
 No separate license or NOTICE applies to them and none is required: there
 is one copyright holder for the whole of this repository, so the LICENSE
 file at the root is the complete license for every file in it.
@@ -24,6 +25,11 @@ Vendored at (the revision each copy was taken from):
   spyglass_pro/modules/instacloak       InstaCloak         9028d15
   spyglass_pro/modules/lens_extender    Lens-Extender      06d451a
 
+The Lens-Extender copy is store.py only: the engine (osint, analyzer, app,
+cli, config, report) was deleted from this tree in the 2026-10 cleanup.
+What remains is the case store that lets runs written by an older build be
+listed and deleted; the revision above is where that file came from.
+
 AUDIT-2026-10.md records where each copy diverges from the revision above,
 including the fixes that exist only in this copy and the deliberate
 rewrites. Read it before syncing anything.
@@ -33,6 +39,6 @@ Third-party code
 No third-party source is bundled here. Runtime and optional dependencies —
 Flask, httpx, rich, cryptography, phonenumbers, and the CLI tools
 (sherlock, maigret, holehe, user-scanner, blackbird, ignorant,
-phoneinfoga, exiftool, shodan) — are installed from their own sources and
+phoneinfoga, exiftool) — are installed from their own sources and
 remain under their own licenses. Each engine package's `__init__.py`
 carries an SPDX identifier so the license travels with the code.

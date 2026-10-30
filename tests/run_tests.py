@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Run the whole Spyglass-Pro suite.
 
-Four suites with four different shapes, one command:
+Three suites with three different shapes, one command:
 
 * ``test_*.py``       — unittest modules (engine suites + the merge layer)
 * ``test_instacloak.py`` — plain test functions, upstream style
-* ``lens_smoke_test.py`` — a script with PASS/FAIL counters
 * ``test_frontend.js`` — the Cases panel under node, always preceded by a
   ``node --check`` on the dashboard JS itself. Skipped when node is not
   installed locally; on CI (``CI`` in the environment) node is required, a
@@ -51,18 +50,6 @@ def run_instacloak():
     return len(fns), len(failed)
 
 
-def run_lens_smoke():
-    """Lens-Extender ships a script that exits non-zero on failure.
-
-    Importing it executes every check and leaves PASS/FAIL behind; only
-    the final ``SystemExit`` is guarded by ``__main__``.
-    """
-    print("\n== lens-extender smoke ==")
-    import lens_smoke_test
-
-    return lens_smoke_test.PASS + lens_smoke_test.FAIL, lens_smoke_test.FAIL
-
-
 def run_cases_ui():
     """The Cases panel's render functions, checked under node.
 
@@ -86,8 +73,11 @@ def run_cases_ui():
 
     total = failed = 0
     app_js = TESTS_DIR.parent / "spyglass_pro" / "static" / "js" / "app.js"
+    # Node writes UTF-8; subprocess.run(text=True) without an encoding
+    # decodes with the platform codec (cp1252 on default Windows), so a
+    # non-ASCII byte in tool output would crash the runner while reporting it.
     check = subprocess.run([node, "--check", str(app_js)], capture_output=True,
-                           text=True)
+                           text=True, encoding="utf-8", errors="replace")
     if check.returncode == 0:
         print("  [PASS] node --check app.js")
     else:
@@ -97,7 +87,8 @@ def run_cases_ui():
     total += 1
 
     script = TESTS_DIR / "test_frontend.js"
-    proc = subprocess.run([node, str(script)], capture_output=True, text=True)
+    proc = subprocess.run([node, str(script)], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace")
     sys.stdout.write(proc.stdout)
     if proc.returncode:
         sys.stdout.write(proc.stderr)
@@ -108,13 +99,6 @@ def run_cases_ui():
 
 def main():
     total, failed = 0, 0
-
-    if "--no-lens" in sys.argv:
-        print("== lens-extender smoke skipped ==")
-    else:
-        lens_total, lens_failed = run_lens_smoke()
-        total += lens_total
-        failed += lens_failed
 
     ic_total, ic_failed = run_instacloak()
     total += ic_total

@@ -1,10 +1,11 @@
 """Shared import helper for the Spyglass-Pro test suite.
 
-The three engines are vendored as top-level packages under
-``spyglass_pro/modules/`` (``spyglass_osint``, ``instacloak``,
-``lens_extender``) because that is where ``spyglass_pro/runner.py`` puts
-them on ``sys.path`` at runtime. The tests import them exactly the same
-way, so a passing test means the dashboard's own import path works.
+The three packages are vendored as top-level packages under
+``spyglass_pro/modules/`` (``spyglass_osint``, ``instacloak`` and
+``lens_extender`` — the last a case store only, its recon engine deleted)
+because that is where ``spyglass_pro/runner.py`` puts them on ``sys.path``
+at runtime. The tests import them exactly the same way, so a passing test
+means the dashboard's own import path works.
 
 We also scrub ``sys.path``. ``spyglass_osint/email.py`` and
 ``spyglass_osint/metadata.py`` shadow stdlib modules of the same name, so

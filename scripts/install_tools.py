@@ -82,8 +82,18 @@ def _blackbird_path():
 # other and with the project venv, and pipx gives each its own venv.
 
 
+# winget/choco/apt write UTF-8, but subprocess.run(text=True) without an
+# encoding decodes with the platform codec — cp1252 on a default Windows
+# install. That mangles the tools' output and raises UnicodeDecodeError on
+# the UTF-8 continuation bytes cp1252 has no mapping for (0x81/0x8D/0x90/
+# 0x9D), crashing the installer on output it was merely reporting. Same
+# policy as the engine's spyglass_osint.utils._TEXT: decode UTF-8, replace
+# anything undecodable rather than failing the install.
+_TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
+
+
 def _run(cmd):
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, **_TEXT)
     return proc.returncode == 0, (proc.stderr or proc.stdout).strip()
 
 
@@ -112,7 +122,7 @@ def _winget_install(package_id):
     proc = subprocess.run(
         [winget, "install", "--id", package_id, "--exact", "--silent",
          "--accept-package-agreements", "--accept-source-agreements"],
-        capture_output=True, text=True)
+        capture_output=True, **_TEXT)
     if proc.returncode == 0:
         return True, (f"installed via winget ({package_id}) — open a new "
                       "terminal so PATH picks it up, then restart the server")
@@ -131,7 +141,7 @@ def _choco_install(*packages):
     if not choco:
         return None
     proc = subprocess.run([choco, "install", "-y", "--no-progress",
-                           *packages], capture_output=True, text=True)
+                           *packages], capture_output=True, **_TEXT)
     names = ", ".join(packages)
     if proc.returncode in (0, 3010):
         return True, (f"installed via choco ({names}) — restart the server "

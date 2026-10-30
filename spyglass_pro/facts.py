@@ -39,13 +39,12 @@ SCHEMA = "spyglass.facts/1"
 # Which engine family produced a query type. Everything without an entry
 # came from the vendored Spyglass-OSINT modules.
 _ENGINE = {
-    "lens": "lens_extender",
     "social": "social_harness",
     "investigation": "correlated",
 }
 
 # Target string → entity kind, where the query type makes it unambiguous.
-# darkweb and lens targets are heterogeneous (email / phone / domain / IP),
+# darkweb targets are heterogeneous (email / phone / domain / IP),
 # so they go through _guess_kind instead.
 _TARGET_KIND = {
     "email": "email",
@@ -118,7 +117,7 @@ def _entities(result, qtype, target):
     if target:
         if qtype in _TARGET_KIND:
             kind = _TARGET_KIND[qtype]
-        elif qtype in ("darkweb", "lens"):
+        elif qtype == "darkweb":
             kind = _guess_kind(target)
         else:
             kind = None  # opsec 'self', metadata paths, social handles …
@@ -157,17 +156,8 @@ def _store_entities(result, qtype):
 
 def _extra_entities(result, qtype, add, engine):
     """Entities the case store's extractor does not cover for this type."""
-    if qtype == "lens":
-        add("ip", result.get("resolved_ip"), engine)
-        guessed = _guess_kind(str(result.get("target") or ""))
-        if guessed:
-            add(guessed, result.get("target"), "target")
-        for name in (result.get("hostnames") or [])[:20]:
-            add("domain", name, engine)
-    elif qtype == "social":
+    if qtype == "social":
         add("username", result.get("handle"), "target")
-    elif qtype == "ip":
-        add("domain", result.get("hostname"), engine)
     elif qtype == "phone":
         pn = result.get("phonenumbers")
         if isinstance(pn, dict) and pn.get("e164"):
@@ -337,37 +327,6 @@ def _extract_website(d, out):
                         "Registration Date")), "whois")
 
 
-def _extract_ip(d, out):
-    src = "spyglass_osint"
-    _flat(out, d.get("geo"), "geo", "geoip", cap=8)
-    _fact(out, "hostname", "Reverse DNS", d.get("hostname"), src)
-    if "a_records" in d:
-        _fact(out, "a_records", "A records", _count(d.get("a_records")), src)
-    shodan = d.get("shodan")
-    if isinstance(shodan, dict):
-        _fact(out, "shodan_ports", "Open ports (Shodan)",
-              _count(shodan.get("ports")), "shodan")
-    _fact(out, "whois_org", "Registrant org",
-          _first(d.get("whois"), ("Organization", "OrgName", "org", "Org")),
-          "whois")
-
-
-def _extract_lens(d, out):
-    src = "lens_extender"
-    _fact(out, "resolved_ip", "Resolved IP", d.get("resolved_ip"), src)
-    _fact(out, "reverse_dns", "Reverse DNS", d.get("reverse_dns"), src)
-    _fact(out, "shodan_org", "Shodan org", d.get("shodan_org"), "shodan")
-    _fact(out, "shodan_isp", "Shodan ISP", d.get("shodan_isp"), "shodan")
-    if "ports" in d:
-        _fact(out, "ports", "Open ports", _count(d.get("ports")),
-              "shodan+internetdb")
-    if "vulns" in d:
-        _fact(out, "vulns", "Vulnerabilities", _count(d.get("vulns")), src)
-    if "software" in d:
-        _fact(out, "software", "Software products",
-              _count(d.get("software")), src)
-
-
 def _extract_darkweb(d, out):
     _fact(out, "ahmia_hits", "Ahmia index hits", _count(d.get("ahmia")),
           "ahmia", "medium")
@@ -480,7 +439,6 @@ _EXTRACTORS = {
     "darkweb": _extract_darkweb,
     "opsec": _extract_opsec,
     "metadata": _extract_metadata,
-    "lens": _extract_lens,
     "investigation": _extract_investigate,
     "social": _extract_social,
 }

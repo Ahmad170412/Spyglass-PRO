@@ -107,6 +107,57 @@ const realDiff = renderCaseDiff(
 check('renders added entities', realDiff.includes('domain:new.com'), realDiff);
 check('renders both run stamps', realDiff.includes('T1') && realDiff.includes('T2'), realDiff);
 
+console.log('== social fields diff ==');
+
+/* A changed link must be verifiable by clicking: the full href rides
+   behind a short host + path label. A truncated display string ending in
+   "…" is not a URL and gets rejected wherever it is pasted. */
+const socialFieldsVerdict = {
+  ok: true, changed: true,
+  counts: [], posts: { added: [], added_count: 0, compared: 0 },
+  fields: [
+    { key: 'avatar_url', label: 'Avatar',
+      old: 'https://cdn.example/u/1/old.jpg?oh=aaa&oe=111',
+      new: 'https://cdn.example/u/1/new.jpg?oh=bbb&oe=222' },
+    { key: 'bio', label: 'Bio', old: 'first bio', new: 'second bio' },
+  ],
+  walls: { new: [], resolved: [] },
+  lists: {},
+};
+const socialHistory = [
+  { taken_at: '2026-10-29T22:42:00', payload: {} },
+  { taken_at: '2026-10-29T22:22:00', payload: {} },
+];
+const fieldsHtml = sandbox.dashDiffHtml(
+  socialFieldsVerdict, { handle: 'qrxznat' }, socialHistory);
+check('field change renders its label and tag',
+      fieldsHtml.includes('Avatar') && fieldsHtml.includes('changed'), fieldsHtml);
+check('link change carries the full href for verification',
+      fieldsHtml.includes('href="https://cdn.example/u/1/old.jpg?oh=aaa&amp;oe=111"'), fieldsHtml);
+check('link display stays a short host + path label',
+      fieldsHtml.includes('cdn.example/u/1/new.jpg?…'), fieldsHtml);
+check('non-link values render as plain text with an arrow',
+      fieldsHtml.includes('first bio') && fieldsHtml.includes('second bio'), fieldsHtml);
+check('non-http(s) values never become links',
+      !sandbox.linkValHtml('javascript:alert(1)').includes('<a '),
+      sandbox.linkValHtml('javascript:alert(1)'));
+
+/* A refused phase must show its reason — "could not compare" rendering
+   as "nothing changed" is how a UI starts lying. */
+const refusedVerdict = {
+  ok: true, changed: false,
+  counts: [{ key: 'follower_count', label: 'Followers', old: 100, new: 100, delta: 0 }],
+  posts: { added: [], added_count: 0, compared: 0,
+    refused: 'the previous check retrieved no posts and it reported 4,185 posts — additions cannot be claimed' },
+  fields: [], walls: { new: [], resolved: [] }, lists: {},
+};
+const refusedHtml = sandbox.dashDiffHtml(
+  refusedVerdict, { handle: 'jay.bsky.team' }, socialHistory);
+check('refused posts phase renders its reason',
+      refusedHtml.includes('additions cannot be claimed'), refusedHtml);
+check('refusal does not read as "nothing changed"',
+      !refusedHtml.includes('No changes since the previous check'), refusedHtml);
+
 console.log('== profile ==');
 
 check('empty profile under a filter explains itself',
@@ -245,20 +296,22 @@ console.log('== keyless tabs hide browser options ==');
     check('instagram tab keeps browser options',
       labels.every((l) => l.style.display === ''), JSON.stringify(labels.map((l) => l.style.display)));
     sandbox.showCaps(list, 'bluesky');
-    check('keyless tab hides the burner row', burnerRow.style.display === 'none', burnerRow.style.display);
+    /* The burner moved to Settings (account config, not target config):
+       the social form has no burner row, so showCaps must leave any
+       stale reference untouched rather than toggle a ghost control. */
+    check('the burner row is gone: showCaps leaves it alone',
+      burnerRow.style.display === undefined, String(burnerRow.style.display));
     sandbox.showCaps(list, 'github');
     check('new keyless tab behaves like the others',
-      burnerRow.style.display === 'none'
-      && labels.every((l) => l.style.display === 'none'), burnerRow.style.display);
+      labels.every((l) => l.style.display === 'none')
+      && caps.textContent.includes('keyless'), caps.textContent);
     sandbox.showCaps(list, 'gitlab');
     check('gitlab behaves like every other keyless tab',
-      burnerRow.style.display === 'none'
-      && labels.every((l) => l.style.display === 'none')
+      labels.every((l) => l.style.display === 'none')
       && !caps.textContent.includes('not in this server'), caps.textContent);
     sandbox.showCaps(list, 'keybase');
     check('keybase behaves like every other keyless tab',
-      burnerRow.style.display === 'none'
-      && labels.every((l) => l.style.display === 'none')
+      labels.every((l) => l.style.display === 'none')
       && !caps.textContent.includes('not in this server'), caps.textContent);
     sandbox.showCaps(list, 'no-such-platform');
     check('platform unknown to the server names the gap and hides browser options',
@@ -488,8 +541,9 @@ console.log('== social preflight tells the truth ==');
   try {
     sandbox.STATUS = { tools: {}, degraded: {}, platforms: [{}, {}, {}], engines: {} };
     const pf = sandbox.preflightHtml('social');
-    check('names the registry, not 0/0 tools',
-      pf.includes('keyless Mastodon/Bluesky') && !pf.includes('0/0'), pf);
+    check('a healthy social scan is badge-only, not a platform roll-call',
+      !pf.includes('keyless Mastodon') && !pf.includes('0/0')
+      && !pf.includes('preflight-detail'), pf);
     check('full power when loaded', pf.includes('FULL POWER'), pf);
     sandbox.STATUS = { tools: {}, degraded: {}, platforms: [], engines: {} };
     const dead = sandbox.preflightHtml('social');
@@ -536,7 +590,7 @@ console.log('== website: light renderer ==');
     whois: { Registrar: 'Example Registrar' },
     dns_records: { A: '1.2.3.4' },
     ct: ['www.example.com'],
-    // Dormant infra keys must not render even if a legacy payload has them.
+    // Removed infra keys must not render even if a legacy payload has them.
     subdomains: ['should-not-render.example.com'],
     shodan: { ports: [80] },
     title: 'nope',
@@ -545,7 +599,7 @@ console.log('== website: light renderer ==');
   check('renders owner / DNS / CT',
     w.includes('WHOIS') && w.includes('DNS records') && w.includes('Certificate transparency'),
     w.slice(0, 300));
-  check('does not render dormant infra',
+  check('does not render removed infra keys',
     !w.includes('Shodan') && !w.includes('Subdomains') && !w.includes('Page title'),
     w.slice(0, 300));
   const entry = sandbox.RENDERERS.find(function (r) { return r.name === 'website'; });
@@ -634,9 +688,321 @@ check('a normal case row stays loadable', !spyglassRow.includes('data-legacy')
 check('a normal case row still offers its timeline',
   spyglassRow.includes('Load this target'), spyglassRow);
 
-/* The registry-failure test above is asynchronous; let its checks land
- * before the tally prints, so the summary matches what actually ran. */
-Promise.resolve(registryFetchTest).then(function () {
+/* ── Targets + CHECK AGAIN: the tracked-target flow's renderers ──
+ * These are pure string builders over server shapes: target rows, stat
+ * deltas, the diff verdict (refusals included) and the history rail.
+ * The async part proves a dead store resolves into a blank state rather
+ * than an unhandled rejection. */
+const targetFlowTest = (async function () {
+  console.log('== Targets + CHECK AGAIN module ==');
+
+  check('the tracked-target flow is present',
+    typeof sandbox.loadSocialDashboard === 'function'
+    && typeof sandbox.checkTarget === 'function'
+    && typeof sandbox.loadTargets === 'function'
+    && typeof sandbox.addTargetFromForm === 'function'
+    && typeof sandbox.removeTargetFlow === 'function', '');
+  check('a check only exists against a tracked target',
+    sandbox.checkTarget.toString().includes('/api/social/targets/')
+    && sandbox.checkTarget.toString().includes('No tracked target'),
+    sandbox.checkTarget.toString().slice(0, 200));
+
+  check('timestamps read as day · time',
+    sandbox.fmtWhen('2026-10-28T08:29:00') === '28 Oct · 08:29',
+    sandbox.fmtWhen('2026-10-28T08:29:00'));
+  check('a missing timestamp is blank, not Invalid Date',
+    sandbox.fmtWhen('') === '' && sandbox.fmtWhen(null) === '',
+    JSON.stringify([sandbox.fmtWhen(''), sandbox.fmtWhen(null)]));
+
+  console.log('== target rows ==');
+  const unchecked = sandbox.targetRowHtml(
+    { id: 7, platform: 'bluesky', handle: 'dawn.example.bsky.social',
+      checks: 0, baseline_at: null, last_check_at: null, last_status: null });
+  check('an unchecked target says no checks yet',
+    unchecked.includes('no checks yet'), unchecked);
+  check('a row can start a check and forget the target',
+    unchecked.includes('data-check-id="7"') && unchecked.includes('data-del-id="7"'),
+    unchecked);
+  const checked = sandbox.targetRowHtml(
+    { id: 8, platform: 'github', handle: 'ahmad-dev', checks: 3,
+      baseline_at: '2026-10-20T17:02:00', last_check_at: '2026-10-28T08:33:00',
+      last_status: 'ok' });
+  check('a checked target shows count and baseline',
+    checked.includes('3 checks') && checked.includes('baseline 20 Oct · 17:02'),
+    checked);
+  const failed = sandbox.targetRowHtml(
+    { id: 9, platform: 'mastodon', handle: 'dawn', checks: 2,
+      baseline_at: '2026-10-27T11:30:00', last_check_at: '2026-10-28T08:31:00',
+      last_status: 'instance refused the list this time' });
+  check('a failed last check is visible on the row',
+    failed.includes('last check failed'), failed);
+  const hostileRow = sandbox.targetRowHtml(
+    { id: 10, platform: 'mastodon', handle: '<img src=x onerror=alert(1)>',
+      checks: 0, baseline_at: null, last_check_at: null, last_status: null });
+  check('handles are escaped in rows', !hostileRow.includes('<img'),
+    hostileRow.slice(0, 200));
+
+  console.log('== stat deltas ==');
+  const stats = sandbox.statCardsHtml(
+    { checks: 5, baseline_at: '2026-10-24T14:09:00' },
+    [{ payload: { follower_count: 1211, following_count: 342 } },
+     { payload: { follower_count: 1204, following_count: 342 } }],
+    { ok: true, lists: { followers: { added: ['x'] }, following: { added: [] } },
+      posts: { added_count: 0 } });
+  check('deltas read against the last check',
+    stats.includes('+7 vs last check') && stats.includes('· no change vs last check'),
+    stats);
+  check('an unread count never renders a number', !stats.includes('Posts'), stats);
+  check('the checks card carries the baseline',
+    stats.includes('Checks') && stats.includes('baseline 24 Oct · 14:09'), stats);
+  check('only panels that exist get a chevron',
+    stats.includes('data-toggle="followers"') && !stats.includes('data-toggle="following"'),
+    stats);
+
+  console.log('== diff verdicts render as the engine worded them ==');
+  const refusal = sandbox.dashDiffHtml(
+    { ok: false, changed: false,
+      error: 'no previous check to compare against — this run is the baseline' },
+    null, []);
+  check('a refusal renders as a refusal',
+    refusal.includes('diff-none') && refusal.includes('this run is the baseline'),
+    refusal);
+  const unchanged = sandbox.dashDiffHtml(
+    { ok: true, changed: false, counts: [{ key: 'follower_count', delta: 0 }],
+      lists: {}, posts: { added: [], added_count: 0 }, fields: [],
+      walls: { new: [], resolved: [] } },
+    { handle: 'u' }, [{ payload: {} }, { taken_at: '2026-10-27T11:30:00', payload: {} }]);
+  check('no change says no change, not an empty box',
+    unchanged.includes('No changes since the previous check'), unchanged);
+  const countsOnly = sandbox.dashDiffHtml(
+    { ok: true, changed: true, counts: [{ key: 'follower_count', delta: 5 }],
+      lists: {}, posts: { added: [], added_count: 0 }, fields: [],
+      walls: { new: [], resolved: [] } },
+    { handle: 'u' }, [{ payload: {} }, { taken_at: '2026-10-27T11:30:00', payload: {} }]);
+  check('count-only movement points at the stats',
+    countsOnly.includes('Count changes only'), countsOnly);
+  const changed = sandbox.dashDiffHtml(
+    { ok: true, changed: true, counts: [],
+      lists: { followers: { added: ['nova.bsky.social'], removed: ['ghost.bsky.social'],
+                            added_refused: null, removed_refused: null } },
+      posts: { added: [], added_count: 0 }, fields: [],
+      walls: { new: [], resolved: [] } },
+    { handle: 'u' },
+    [{ payload: {} }, { taken_at: '2026-10-24T14:09:00', payload: {} }]);
+  check('additions and removals render as rows',
+    changed.includes('new follower') && changed.includes('unfollowed')
+    && changed.includes('nova.bsky.social') && changed.includes('since 24 Oct · 14:09'),
+    changed);
+  const gated = sandbox.dashDiffHtml(
+    { ok: true, changed: false, counts: [],
+      lists: { followers: { added: [], removed: [],
+                            added_refused: 'baseline followers list was not fully enumerated — additions cannot be claimed',
+                            removed_refused: null } },
+      posts: { added: [], added_count: 0 }, fields: [],
+      walls: { new: [], resolved: [] } },
+    { handle: 'u' },
+    [{ payload: {} }, { taken_at: '2026-10-24T14:09:00', payload: {} }]);
+  check('a refused side explains itself instead of claiming no change',
+    gated.includes('no diff claimed')
+    && gated.includes('additions cannot be claimed'), gated);
+  const injected = sandbox.dashDiffHtml(
+    { ok: true, changed: true, counts: [],
+      lists: { followers: { added: ['<img src=x onerror=alert(1)>'], removed: [],
+                            added_refused: null, removed_refused: null } },
+      posts: { added: [], added_count: 0 }, fields: [],
+      walls: { new: [], resolved: [] } },
+    { handle: 'u' },
+    [{ payload: {} }, { taken_at: '2026-10-24T14:09:00', payload: {} }]);
+  check('diff rows escape handles', !injected.includes('<img'), injected.slice(0, 300));
+
+  console.log('== history rail ==');
+  const rail = sandbox.historyRailHtml({ handle: 'u' }, [
+    { taken_at: '2026-10-28T08:29:00', payload: { follower_count: 1211, status: 'ok' } },
+    { taken_at: '2026-10-24T14:09:00', payload: { follower_count: 1204 } },
+  ]);
+  check('history reads newest → oldest (latest at the top)',
+    rail.indexOf('28 Oct · 08:29') < rail.indexOf('24 Oct · 14:09'), rail);
+  check('the oldest card is the baseline',
+    rail.includes('Baseline established') && rail.includes('followers'), rail);
+  check('later cards show count deltas', rail.includes('+7 followers'), rail);
+  check('the newest card is marked latest and selected',
+    rail.includes('tl-tag') && rail.indexOf('class="tl-row active"') > -1
+    && rail.indexOf('data-hist-index="0"') > -1, rail);
+  check('an empty history renders nothing',
+    sandbox.historyRailHtml({ handle: 'u' }, []) === '',
+    sandbox.historyRailHtml({ handle: 'u' }, []));
+
+  console.log('== timeline selection rewinds the main column ==');
+  const rewound = sandbox.statCardsHtml(
+    { checks: 2, baseline_at: '2026-10-24T14:09:00' },
+    [{ taken_at: '2026-10-28T08:29:00', payload: { follower_count: 1211 } },
+     { taken_at: '2026-10-24T14:09:00', payload: { follower_count: 1204 } }],
+    null, 1);
+  check('an older check shows its own counts',
+    rewound.includes('1,204') && !rewound.includes('1,211'), rewound);
+  check('an older check says it is showing that check',
+    rewound.includes('showing 24 Oct · 14:09'), rewound);
+  const rewoundDiff = sandbox.dashDiffHtml(
+    { ok: false, changed: false, error: 'no previous check' },
+    { handle: 'u' },
+    [{ taken_at: '2026-10-28T08:29:00', payload: {} },
+     { taken_at: '2026-10-24T14:09:00', payload: {} }], 1);
+  check('the oldest retained check reads as the baseline',
+    rewoundDiff.includes('Baseline recorded') && !rewoundDiff.includes('no previous check'),
+    rewoundDiff);
+
+  console.log('== media follows the selected check ==');
+  const media = sandbox.mediaPanelHtml({ id: 7 }, {
+    taken_at: '2026-10-29T22:22:00',
+    payload: {
+      capabilities: ['media', 'stories'],
+      stories: { count: 1, items: [
+        { id: 's1', taken_at: 1791478000, file: 'output/u/media/stories/story_s1.jpg' },
+      ] },
+      posts: [{ caption: 'boat', timestamp: 1791478332,
+                media_files: ['output/u/media/abc.jpg'] }],
+    },
+  }, 'instagram');
+  check('story files render as media tiles',
+    media.includes('/api/social/media/7') && media.includes('story_s1.jpg')
+    && media.includes('>Stories<'), media);
+  check('post files render beside their check', media.includes('boat'), media);
+  const legacyMedia = sandbox.mediaPanelHtml({ id: 7 }, {
+    taken_at: '2026-10-29T22:22:00',
+    payload: { capabilities: ['media', 'stories'], posts: [{ caption: 'old' }] },
+  }, 'instagram');
+  check('a snapshot without story capture says so',
+    legacyMedia.includes('predates story capture'), legacyMedia);
+  check('a snapshot without per-post files says so',
+    legacyMedia.includes('predates per-post media capture'), legacyMedia);
+  const noStories = sandbox.mediaPanelHtml({ id: 7 }, {
+    taken_at: '2026-10-29T22:22:00',
+    payload: { capabilities: ['media', 'stories'], stories: { count: 0, items: [] },
+               posts: [{ caption: 'x', media_files: [] }] },
+  }, 'instagram');
+  check('an empty story tray is not "not captured"',
+    noStories.includes('No active stories') && !noStories.includes('predates'),
+    noStories);
+
+  console.log('== dashboard header says one true thing ==');
+  (function () {
+    const els = {};
+    ['socialPlatformName', 'socialHandleTitle', 'socialCheckBtn',
+     'socialBurnerPill', 'socialWhen'].forEach((id) => {
+      els[id] = { textContent: '', innerHTML: '', hidden: false, disabled: false };
+    });
+    const realGet = sandbox.document.getElementById;
+    sandbox.document.getElementById = (id) => els[id] || null;
+    try {
+      sandbox.paintDashboardHead('instagram', {
+        handle: 'qrxznat', checks: 0, baseline_at: null,
+        last_check_at: '2026-10-29T21:53:00',
+        last_status: 'stealth browser unavailable (exit 1)',
+      }, {});
+      check('a failed first attempt explains itself',
+        els.socialWhen.innerHTML.includes('no baseline yet')
+        && els.socialWhen.innerHTML.includes('last attempt failed')
+        && els.socialWhen.innerHTML.includes('exit 1'), els.socialWhen.innerHTML);
+      check('no phantom last-check time beside zero checks',
+        !els.socialWhen.innerHTML.includes('last check'), els.socialWhen.innerHTML);
+      check('the baseline is never painted red',
+        !els.socialWhen.innerHTML.includes('past'), els.socialWhen.innerHTML);
+      sandbox.paintDashboardHead('instagram', {
+        handle: 'qrxznat', checks: 3, last_status: 'ok',
+        last_check_at: '2026-10-29T21:53:00',
+        baseline_at: '2026-10-27T22:15:00',
+      }, {});
+      check('a healthy target shows both stamps on one line',
+        els.socialWhen.innerHTML.includes('last check')
+        && els.socialWhen.innerHTML.includes('baseline')
+        && els.socialWhen.innerHTML.includes('27 Oct · 22:15'),
+        els.socialWhen.innerHTML);
+      check('a healthy target reports no failure',
+        !els.socialWhen.innerHTML.includes('failed'), els.socialWhen.innerHTML);
+      sandbox.paintDashboardHead('instagram', null, {});
+      check('no target hides the status line and locks the button',
+        els.socialWhen.hidden === true && els.socialCheckBtn.disabled === true
+        && els.socialHandleTitle.textContent === 'no target',
+        JSON.stringify({ hidden: els.socialWhen.hidden,
+                         subject: els.socialHandleTitle.textContent }));
+    } finally {
+      sandbox.document.getElementById = realGet;
+    }
+  })();
+
+  console.log('== the unchecked dashboard says it once ==');
+  const emptyStats = sandbox.statCardsHtml({ checks: 0, baseline_at: null }, [], null);
+  check('no checks → no stat row at all', emptyStats === '', emptyStats);
+  const noChecks = sandbox.dashDiffHtml(null, { handle: 'u' }, []);
+  check('the no-check blank is one short line',
+    noChecks.includes('No baseline yet') && noChecks.length < 220, noChecks);
+  const oneCheck = sandbox.dashDiffHtml(
+    { ok: false, changed: false,
+      error: 'no previous check to compare against — this run is the baseline' },
+    { handle: 'u' }, [{ payload: {} }]);
+  check('a recorded baseline reads as a state, not an engine refusal',
+    oneCheck.includes('Baseline recorded') && !oneCheck.includes('diff-none'), oneCheck);
+
+  console.log('== check payload: options in, burner only where a login exists ==');
+  const realGet = sandbox.document.getElementById;
+  const realFetch = sandbox.fetch;
+  const realMeta = sandbox.SOCIAL_META;
+  const formEl = {
+    querySelectorAll: (sel) => (sel === '[data-flag]' ? [
+      { type: 'checkbox', checked: true, getAttribute: () => 'deep' },
+      { type: 'checkbox', checked: false, getAttribute: () => 'store' },
+    ] : []),
+  };
+  sandbox.document.getElementById = (id) => (id === 'form-social' ? formEl : null);
+  sandbox.SOCIAL_META = {
+    instagram: { browser: true, login: 'instacloak' },
+    bluesky: { browser: false, login: 'none' },
+  };
+  try {
+    const plain = sandbox.buildCheckPayload('bluesky');
+    check('checked options ride the payload',
+      plain.deep === '1' && plain.store === undefined, JSON.stringify(plain));
+    check('no burner is attached without a stored login',
+      plain.burner_enabled === undefined, JSON.stringify(plain));
+    sandbox.localStorage.getItem = (k) => (
+      k === 'spyglass_burner'
+        ? JSON.stringify({ enabled: true, username: 'ops', password: 'hunter2' })
+        : null);
+    const insta = sandbox.buildCheckPayload('instagram');
+    check('the burner rides a login platform',
+      insta.burner_enabled === '1' && insta.burner_username === 'ops',
+      JSON.stringify(insta));
+    const keyless = sandbox.buildCheckPayload('bluesky');
+    check('the burner stays off keyless tabs even when configured',
+      keyless.burner_enabled === undefined, JSON.stringify(keyless));
+  } finally {
+    sandbox.document.getElementById = realGet;
+    sandbox.fetch = realFetch;
+    sandbox.SOCIAL_META = realMeta;
+    sandbox.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  }
+
+  console.log('== a dead store resolves into a blank state ==');
+  sandbox.document.getElementById = () => null;
+  sandbox.fetch = () => Promise.reject(new Error('no network in tests'));
+  try {
+    const pending = sandbox.loadSocialDashboard('mastodon');
+    check('loadSocialDashboard returns a promise',
+      !!pending && typeof pending.then === 'function', String(pending));
+    await pending;
+    check('a dead target store resolves instead of rejecting', true);
+  } catch (err) {
+    check('a dead target store resolves instead of rejecting', false, String(err));
+  } finally {
+    sandbox.document.getElementById = realGet;
+    sandbox.fetch = realFetch;
+  }
+})();
+
+/* The registry-failure test and the target-flow test above are both
+ * asynchronous; let their checks land before the tally prints, so the
+ * summary matches what actually ran. */
+Promise.all([registryFetchTest, targetFlowTest]).then(function () {
   console.log(`\n${'='.repeat(40)}\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 });

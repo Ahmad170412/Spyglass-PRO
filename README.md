@@ -81,8 +81,8 @@ a target, and how do I know the answer is real?**
 
 1.5 is the pivot release. Spyglass-Pro stops being an *infrastructure*
 product and becomes a **HUMINT** one: the IP module, the heavy website phases
-and Lens-Extender are no longer part of the product surface, and the build
-gains what replaces them. The full list is in the
+and Lens-Extender were deleted outright, and the build gains what replaces
+them. The full list is in the
 [changelog](CHANGELOG.md).
 
 - **Identity resolution.** Full Investigation now resolves its inputs into a
@@ -95,9 +95,9 @@ gains what replaces them. The full list is in the
   three-column accounts table, compact links and conflicts, and `Details` /
   `Run log (N)` / `Raw JSON` as collapsed drawers.
 - **A themed delete dialog** replaces `window.confirm` for stored cases.
-- **The boundary is enforced, not documented.** Any module that is neither
-  exposed nor explicitly dormant is refused at the API — a new engine cannot
-  become reachable by accident.
+- **The boundary is enforced, not documented.** Any module outside the
+  exposed list is refused at the API — a new engine cannot become
+  reachable by accident.
 - **The API-key vault is its own file** (`~/.spyglass/vault.json`) and offers
   only the two keys an exposed module actually reads.
 
@@ -158,13 +158,15 @@ launch agent instead of a login shell.
 | **Phone** | phoneinfoga + ignorant, plus breach correlation |
 | **Dark web** | Ahmia onion-index search, breach data, keyed IntelX + HIBP |
 | **Social** | Instagram (stealth browser) + Bluesky, GitHub, GitLab, Keybase and Mastodon (keyless, instant), one registry-driven panel |
+| **Targets** | Track a social handle once — its platform tab becomes its CHECK AGAIN dashboard: baseline, stat deltas, honest per-list diffs, new posts and history |
 | **OPSEC** | Local self-check: your real IP, proxy status, DNS-leak exposure, timezone/geo fingerprint risk |
 | **Metadata** | ExifTool + PDF/OOXML/image fallbacks, MD5/SHA-256, GPS, with file-type reconciliation |
 | **Cases** | Encrypted-at-rest run history with entity diffing, timelines and dossier export |
 
-The **IP Address** panel and **Lens-Extender** are not part of this build.
-Their code stays in the tree for a sibling tool, but no panel and no endpoint
-can reach it — see [Passive-only](#passive-only).
+The **IP Address** panel and **Lens-Extender** are not part of this build:
+their engines were deleted from the tree outright, not merely hidden — no
+panel and no endpoint can reach what no longer exists. See
+[Passive-only](#passive-only).
 
 ---
 
@@ -326,11 +328,16 @@ That code was **removed, not disabled** — the
 removed function, so none of it can be switched back on by configuration or a
 stray flag.
 
-**The IP module, the heavy website phases and Lens-Extender are unexposed.**
-They stay in the tree — a sibling tool consumes them — but no dashboard panel
-and no API endpoint can reach them: the HTTP boundary refuses them by name.
-The boundary is enforced rather than documented, and a test pins the handler
-map to the exposed set, so a new engine cannot become reachable by accident.
+**The IP module, the heavy website phases and Lens-Extender are deleted.**
+The engines are gone from the tree — `spyglass_osint.ip`, the Shodan/ports,
+subdomain-sweep and Wayback phases of the website module, and every
+Lens-Extender module except its case store — so there is nothing left to
+route, refuse or re-enable by configuration. What survives of Lens is the
+SQLite store that lets an older build's stored runs still be listed and
+deleted; it collects nothing and has no scan writer. The boundary itself is
+enforced rather than documented: the HTTP layer refuses any module outside
+the scope list, and a test pins the handler map to that list, so a new
+engine cannot become reachable by accident.
 
 **Where the line sits:** ordinary DNS record lookups (A, MX, NS, TXT, SPF,
 DMARC, CNAME) are still made, because no useful host recon exists without them
@@ -447,7 +454,9 @@ Every route is under `/api/*` and requires the Bearer token when
 | `GET /api/spyglass/run` | Run one spyglass module (`module`, `target`, + flags) |
 | `POST /api/investigate/run` | Parallel multi-input investigation with the person model |
 | `GET /api/social/platforms` | Registered adapters and their capabilities |
-| `POST /api/social/run` | Collect one social profile |
+| `GET/POST /api/social/targets` | Tracked targets: list, or add one (platform + handle) |
+| `GET/DELETE /api/social/targets/<id>` | One target with its history and recomputed last diff; or forget it entirely |
+| `POST /api/social/targets/<id>/check` | CHECK AGAIN — collect, diff against the last successful check, record |
 | `GET /api/cases` · `/diff` · `/timeline` · `/profile` | Stored-run queries |
 | `DELETE /api/cases/run` | Delete one stored run (and its entity rows) |
 | `GET /api/jobs` · `/api/job/<id>` · `/api/stream/<id>` | Async job registry, polling, live SSE log |
@@ -489,7 +498,7 @@ of the run.
 .venv/bin/python tests/run_tests.py
 ```
 
-**627 offline checks** — the vendored engines' own suites plus the merge layer
+**564 offline checks** — the vendored engines' own suites plus the merge layer
 (API surface, auth gate, request-origin gate, proxy validation and masking,
 job pool, target validation, the exposure boundary, identity resolution, the
 vault, entity encryption, case queries, cross-platform filename and decoding
@@ -524,7 +533,7 @@ bug:
 ```
 run.py                     dev entry point
 scripts/install_tools.py   idempotent CLI-engine installer
-tests/                     627 offline checks (run_tests.py)
+tests/                     564 offline checks (run_tests.py)
 assets/logo.svg            README logo
 docs/screenshots/          dashboard screenshot
 spyglass_pro/

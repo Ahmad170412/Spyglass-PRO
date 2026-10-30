@@ -33,26 +33,12 @@ class RenderEmailTest(unittest.TestCase):
         self.assertIn("**Exposed fields:** email, name", md)
 
 
-class RenderIpTest(unittest.TestCase):
-    def test_ip_dossier(self):
-        r = {
-            "ip": "1.2.3.4",
-            "geo": {"country": "US", "city": "Testville", "isp": "Test ISP"},
-            "shodan": {"ports": [22, 443], "hostnames": ["x.example.com"]},
-        }
-        md = report.render(r, "ip", "1.2.3.4")
-        self.assertIn("### Geolocation", md)
-        self.assertIn("**Country:** US", md)
-        # Port data is Shodan's now; the nmap section is gone with the scan.
-        self.assertIn("### Shodan", md)
-        self.assertIn("22", md)
-        self.assertNotIn("Open ports (nmap)", md)
-
-
 class RenderErrorTest(unittest.TestCase):
     def test_error_result_rendered_as_quote(self):
-        md = report.render({"error": "Could not resolve: nope.invalid"}, "ip", "nope.invalid")
+        md = report.render({"error": "Could not resolve: nope.invalid"},
+                           "website", "nope.invalid")
         self.assertIn("Could not resolve: nope.invalid", md)
+        self.assertIn("> Could not resolve: nope.invalid", md)
 
 
 class RenderInvestigationTest(unittest.TestCase):
@@ -129,15 +115,16 @@ class RenderOpsecTest(unittest.TestCase):
 class WriteReportTest(unittest.TestCase):
     def test_write_report_creates_sanitized_file(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(report._ui, "info"):
-            path = report.write_report({"a": 1}, "ip", "1.2.3.4:80", tmp)
+            path = report.write_report({"a": 1}, "darkweb", "1.2.3.4:80", tmp)
             self.assertTrue(os.path.isfile(path))
-            self.assertTrue(os.path.basename(path).startswith("spyglass_report_ip_1.2.3.4_80_"))
+            self.assertTrue(os.path.basename(path).startswith("spyglass_report_darkweb_1.2.3.4_80_"))
             with open(path, encoding="utf-8") as f:
-                self.assertIn("# Spyglass Report — ip", f.read())
+                self.assertIn("# Spyglass Report — darkweb", f.read())
 
     def test_render_reports_version(self):
         pkg = imp("")
-        self.assertIn(f"- **Spyglass version:** {pkg.__version__}", report.render({}, "ip", "x"))
+        self.assertIn(f"- **Spyglass version:** {pkg.__version__}",
+                      report.render({}, "darkweb", "x"))
 
 
 if __name__ == "__main__":

@@ -94,6 +94,11 @@ def _cfg_for(options: dict) -> dict:
     cfg = ic_config.load_config(None)
     cfg["deep"] = bool(options.get("deep"))
     cfg["download_media"] = bool(options.get("media"))
+    # The dashboard's check window is the same 40 items everywhere, so
+    # CHECK AGAIN compares like with like across platforms. The standalone
+    # InstaCloak CLI keeps its own config default; only this merge layer
+    # pins the window.
+    cfg["max_posts"] = int(options.get("max_posts") or 40)
     if options.get("proxy_url"):
         cfg["proxy_enabled"] = True
         cfg["proxy_url"] = options["proxy_url"]
