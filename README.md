@@ -56,7 +56,7 @@ a target, and how do I know the answer is real?**
 
 ## Table of Contents
 
-- [What's new in 1.5](#whats-new-in-15)
+- [What's new in 1.6](#whats-new-in-16)
 - [Quick Start](#quick-start)
 - [Features](#features)
 - [Architecture](#architecture)
@@ -77,7 +77,7 @@ a target, and how do I know the answer is real?**
 
 ---
 
-## What's new in 1.5
+## What's new in 1.6
 
 1.5 is the pivot release. Spyglass-Pro stops being an *infrastructure*
 product and becomes a **HUMINT** one: the IP module, the heavy website phases
@@ -498,7 +498,7 @@ of the run.
 .venv/bin/python tests/run_tests.py
 ```
 
-**564 offline checks** — the vendored engines' own suites plus the merge layer
+**718 offline checks** — the vendored engines' own suites plus the merge layer
 (API surface, auth gate, request-origin gate, proxy validation and masking,
 job pool, target validation, the exposure boundary, identity resolution, the
 vault, entity encryption, case queries, cross-platform filename and decoding
