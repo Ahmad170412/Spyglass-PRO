@@ -16,6 +16,9 @@ recursive-include scripts *.py
 recursive-include tests *.py *.js
 recursive-include docs *
 recursive-include assets *
+# CHANGELOG.md points at the approved social redesign mockup; keep the link
+# resolvable for anyone reading the sdist.
+recursive-include mockups *.html
 
 # Working documents that live in the tree but must never ship. They are
 # excluded from git too, but MANIFEST.in does not read .gitignore — a

@@ -118,7 +118,7 @@ def _diff_posts(old: dict, new: dict) -> dict[str, Any]:
         nonzero = isinstance(old_post_count, (int, float)) and old_post_count > 0
         if unread or nonzero:
             seen = ("no post count was reported" if unread
-                    else f"it reported {int(old_post_count):,} posts")
+                    else f"it reported {old_post_count:,} posts")
             out.update(
                 added=[],
                 added_count=0,

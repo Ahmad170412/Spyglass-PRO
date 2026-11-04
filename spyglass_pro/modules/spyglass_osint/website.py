@@ -134,9 +134,9 @@ def _http_body(url, timeout=15, limit=1_000_000):
             body = got[1] if got else ""
         return body
 
-    # Retry: these are free third-party endpoints (crt.sh, CertSpotter,
-    # HackerTarget, Wayback) that rate-limit and 5xx transiently. Without
-    # this a single 429 drops the source from the report silently.
+    # Retry: crt.sh is a free third-party endpoint that rate-limits and 5xxes
+    # transiently. Without this a single 429 drops the source from the report
+    # silently.
     body = utils.retry_call(_once, attempts=3)
     # Only cache a success. Caching the empty string would make one
     # transient failure permanent for the rest of the process, which is

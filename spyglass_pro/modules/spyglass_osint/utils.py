@@ -118,7 +118,7 @@ def retry_call(fn, attempts=3, base_delay=1.0, max_delay=8.0):
     """Call ``fn`` until it returns something truthy, backing off between tries.
 
     Every passive source this engine uses is a free third-party endpoint:
-    crt.sh, CertSpotter, HackerTarget and ip-api.
+    crt.sh for Certificate Transparency and ip-api for the OPSEC self-check.
     They rate-limit hard, and several 5xx under load. With a single attempt
     one 429 or one blip silently removes that source from the result — the
     scan still "succeeds", just with less in it, which is the worst way to

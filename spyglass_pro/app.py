@@ -7,8 +7,7 @@ import threading
 import time
 from urllib.parse import urlparse, urlsplit
 
-from flask import (Flask, Response, jsonify, render_template, request,
-                   send_file, stream_with_context)
+from flask import Flask, Response, jsonify, render_template, request, send_file, stream_with_context
 
 from spyglass_pro import __version__, runner, scope
 

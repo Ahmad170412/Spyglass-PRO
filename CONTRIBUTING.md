@@ -5,9 +5,9 @@
 **Spyglass-Pro is passive-only. Never open a connection to a target.**
 
 Every query goes to a third party — DNS resolvers, Certificate Transparency
-logs, WHOIS registries, InternetDB, RDAP, RIPEstat, Wayback, crt.sh,
-CertSpotter, HackerTarget, breach databases. Spyglass-Pro itself never
-connects to the thing being investigated.
+(crt.sh), WHOIS registries, breach databases (LeakCheck, Scylla, and keyed
+IntelX/HIBP), Ahmia's onion index, and the social platform APIs. Spyglass-Pro
+itself never connects to the thing being investigated.
 
 That means no port scan, no directory brute force, no HTTP probe of a
 discovered host, no zone-transfer attempt, and not even a fetch of a target's

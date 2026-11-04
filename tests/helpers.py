@@ -32,6 +32,13 @@ for _path in (_ROOT, _MODULES_DIR):
 
 sys.path[:] = [p for p in sys.path if p and os.path.abspath(p) != _PKG_DIR]
 
+# Forge adapters honour GITHUB_TOKEN / GITLAB_TOKEN from the environment.
+# The offline fixtures assume the keyless path (and a fixed number of mocked
+# requests), so a developer's own exported token must not change the suite's
+# shape. Tests that exercise token behaviour patch these explicitly.
+for _token_var in ("GITHUB_TOKEN", "GITLAB_TOKEN"):
+    os.environ.pop(_token_var, None)
+
 
 def imp(name: str = ""):
     """Import a module inside the vendored spyglass_osint package."""

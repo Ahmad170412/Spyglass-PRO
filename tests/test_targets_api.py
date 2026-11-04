@@ -22,8 +22,8 @@ from unittest import mock
 
 import helpers  # noqa: F401  — puts the repo root and modules/ on sys.path
 
-import spyglass_pro.runner as runner
 import spyglass_pro.app as app_module
+import spyglass_pro.runner as runner
 from spyglass_pro.app import app
 from spyglass_pro.social import tracking
 

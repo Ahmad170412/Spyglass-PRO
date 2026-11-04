@@ -79,27 +79,26 @@ a target, and how do I know the answer is real?**
 
 ## What's new in 1.6
 
-1.5 is the pivot release. Spyglass-Pro stops being an *infrastructure*
-product and becomes a **HUMINT** one: the IP module, the heavy website phases
-and Lens-Extender were deleted outright, and the build gains what replaces
-them. The full list is in the
+1.6 turns the social tabs into tracked dashboards and finishes the 1.5
+pivot by deleting the buried IP/web OSINT code. The full list is in the
 [changelog](CHANGELOG.md).
 
-- **Identity resolution.** Full Investigation now resolves its inputs into a
-  person model — seven layers, one value per field, list-ready — with
-  `high` / `medium` / `possible` confidence on every link.
-- **Website recon is light and owner-scoped.** Owner/registrant, WHOIS, basic
-  DNS, SPF/DMARC/DKIM/CAA, wildcard-DNS detection and Certificate
-  Transparency. A domain or an `http(s)` URL only — never a direct IP.
-- **The results panel reads like a report.** A compact person grid, a
-  three-column accounts table, compact links and conflicts, and `Details` /
-  `Run log (N)` / `Raw JSON` as collapsed drawers.
-- **A themed delete dialog** replaces `window.confirm` for stored cases.
-- **The boundary is enforced, not documented.** Any module outside the
-  exposed list is refused at the API — a new engine cannot become
-  reachable by accident.
-- **The API-key vault is its own file** (`~/.spyglass/vault.json`) and offers
-  only the two keys an exposed module actually reads.
+- **Tracked targets and CHECK AGAIN.** A handle is added once on the
+  **Targets** panel; each platform tab becomes that target's dashboard,
+  with a baseline, stat deltas, per-list diffs, new posts and history.
+- **A per-check history rail.** Every check keeps its own snapshot and
+  verdict; clicking a card rewinds the main column to that check.
+- **Instagram media, per check.** Stories and post files are stored with
+  the snapshot that saw them and served only from that target's media.
+- **Diff honesty.** A failed feed fetch can no longer manufacture "new
+  posts", and a re-signed CDN avatar URL is not a profile change.
+- **The buried IP/web code is deleted, not dormant.** `spyglass_osint.ip`,
+  the heavy website phases and the Lens-Extender engine are gone from the
+  tree, with a test that fails if any of it reappears.
+- **Identity resolution and light website recon** (from 1.5) remain the
+  product surface: a person model with confidence on every link, and
+  owner/registrant, WHOIS, DNS, SPF/DMARC/DKIM/CAA, wildcard DNS and CT —
+  never a direct IP.
 
 ---
 
@@ -457,6 +456,7 @@ Every route is under `/api/*` and requires the Bearer token when
 | `GET/POST /api/social/targets` | Tracked targets: list, or add one (platform + handle) |
 | `GET/DELETE /api/social/targets/<id>` | One target with its history and recomputed last diff; or forget it entirely |
 | `POST /api/social/targets/<id>/check` | CHECK AGAIN — collect, diff against the last successful check, record |
+| `GET /api/social/media/<target>` | Media files referenced by that target's snapshots |
 | `GET /api/cases` · `/diff` · `/timeline` · `/profile` | Stored-run queries |
 | `DELETE /api/cases/run` | Delete one stored run (and its entity rows) |
 | `GET /api/jobs` · `/api/job/<id>` · `/api/stream/<id>` | Async job registry, polling, live SSE log |
@@ -533,7 +533,7 @@ bug:
 ```
 run.py                     dev entry point
 scripts/install_tools.py   idempotent CLI-engine installer
-tests/                     564 offline checks (run_tests.py)
+tests/                     718 offline checks (run_tests.py)
 assets/logo.svg            README logo
 docs/screenshots/          dashboard screenshot
 spyglass_pro/
