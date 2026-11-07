@@ -38,10 +38,10 @@ jobs:
             grep -q "spyglass_pro/modules/$pkg/__init__.py" wheel-listing.txt \
               || { echo "MISSING vendored package: $pkg"; exit 1; }
           done
-      - name: twine check — the long description must render on PyPI
-        # readme_renderer validates README.md the way PyPI will. A description
-        # that fails here is rejected or renders broken on the project page, so
-        # this gates the publish instead of discovering it after the fact.
+      - name: twine check — the long description must render
+        # readme_renderer validates README.md the way a package index will. A
+        # description that fails here renders broken wherever the artifact is
+        # published, so this gates the build instead of discovering it later.
         run: twine check dist/*
       - name: The sdist must not carry local working drafts
         # MANIFEST.in does not read .gitignore, so a draft that is ignored in

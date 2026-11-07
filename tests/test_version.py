@@ -23,7 +23,7 @@ class VersionTest(unittest.TestCase):
         """pyproject and the app must agree — two version strings that
         can drift (1.0.0 vs 1.0.0-pro once did) break every version check
         a user or script performs. 1.0.0-pro is not even PEP 440-valid,
-        so PyPI would reject an upload carrying it. Parsed by regex so
+        so a package index would reject an upload carrying it. Parsed by regex so
         this holds on 3.10 too (no tomllib there)."""
         import re
         from pathlib import Path

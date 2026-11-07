@@ -9,7 +9,6 @@ One passive OSINT dashboard: identity resolution, light website recon, breach an
 
 [![CI](https://github.com/Ahmad170412/Spyglass-PRO/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmad170412/Spyglass-PRO/actions)
 [![Release](https://img.shields.io/github/v/release/Ahmad170412/Spyglass-PRO?color=6366f1&label=release)](https://github.com/Ahmad170412/Spyglass-PRO/releases)
-[![PyPI](https://img.shields.io/pypi/v/spyglass-pro.svg)](https://pypi.org/project/spyglass-pro/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-06b6d4.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![Language](https://img.shields.io/github/languages/top/Ahmad170412/Spyglass-PRO?color=6366f1&label=python)](https://github.com/Ahmad170412/Spyglass-PRO)
@@ -107,7 +106,8 @@ pivot by deleting the buried IP/web OSINT code. The full list is in the
 Copy-paste ready. No API keys, no accounts, no configuration.
 
 ```bash
-pip install spyglass-pro
+# From the GitHub release (no clone needed)
+pip install https://github.com/Ahmad170412/Spyglass-PRO/releases/download/v1.6.0/spyglass_pro-1.6.0-py3-none-any.whl
 spyglass-pro
 ```
 
@@ -134,7 +134,7 @@ python scripts/install_tools.py --check    # see what's missing
 python scripts/install_tools.py            # install the missing ones
 ```
 
-If you installed from PyPI (no checkout), install the engines directly — the
+If you installed the wheel (no checkout), install the engines directly — the
 installer's docstring lists the exact command per tool and platform. The Python
 ones go through `pipx` (isolated venvs); `blackbird` is a git clone and
 `phoneinfoga` a release binary, so the script is the reliable path when you
@@ -284,7 +284,7 @@ python scripts/install_tools.py            # install the missing ones
 This covers sherlock, maigret, holehe, ignorant, blackbird, user-scanner,
 phoneinfoga, exiftool, dig/whois/curl and torsocks — every tool the
 dashboard can detect. It ships with a **source checkout** (`git clone` /
-`pip install -e .`), not the published wheel; a PyPI install has no
+`pip install -e .`), not the published wheel; a wheel install has no
 `scripts/` directory, so install the engines directly there. The script is
 idempotent — re-running it only installs what is still missing. Python CLIs
 install via pipx (isolated venvs, no dependency conflicts); system tools via
