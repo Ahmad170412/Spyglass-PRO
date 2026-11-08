@@ -21,7 +21,7 @@ One passive OSINT dashboard: identity resolution, light website recon, breach an
 
 ---
 
-![Spyglass-Pro overview — stat cards and the per-module data-source grid](https://raw.githubusercontent.com/Ahmad170412/Spyglass-PRO/main/docs/screenshots/dashboard-overview.png)
+![Spyglass-Pro — a tracked GitHub target with stat deltas, honest list diffs, new posts and a per-check history rail](https://raw.githubusercontent.com/Ahmad170412/Spyglass-PRO/main/docs/screenshots/social-dashboard.png)
 
 ## Why Spyglass-Pro?
 
@@ -50,6 +50,14 @@ a target, and how do I know the answer is real?**
 > **Built for people who need the truth.** OSINT tools are dual-use. Only
 > investigate systems and accounts you own or have explicit permission to
 > test. See [Responsible use](#responsible-use).
+
+### A look inside
+
+![Full Investigation — the person model with a confidence on every account and link](https://raw.githubusercontent.com/Ahmad170412/Spyglass-PRO/main/docs/screenshots/full-investigation.png)
+
+| Stored cases | Targets |
+| --- | --- |
+| ![Stored cases — an entity diff between two website runs](https://raw.githubusercontent.com/Ahmad170412/Spyglass-PRO/main/docs/screenshots/stored-cases.png) | ![Targets — tracked handles and their check cadence](https://raw.githubusercontent.com/Ahmad170412/Spyglass-PRO/main/docs/screenshots/targets.png) |
 
 ---
 
@@ -498,7 +506,7 @@ of the run.
 .venv/bin/python tests/run_tests.py
 ```
 
-**718 offline checks** — the vendored engines' own suites plus the merge layer
+**719 offline checks** — the vendored engines' own suites plus the merge layer
 (API surface, auth gate, request-origin gate, proxy validation and masking,
 job pool, target validation, the exposure boundary, identity resolution, the
 vault, entity encryption, case queries, cross-platform filename and decoding
@@ -533,9 +541,9 @@ bug:
 ```
 run.py                     dev entry point
 scripts/install_tools.py   idempotent CLI-engine installer
-tests/                     718 offline checks (run_tests.py)
+tests/                     719 offline checks (run_tests.py)
 assets/logo.svg            README logo
-docs/screenshots/          dashboard screenshot
+docs/screenshots/          dashboard screenshots (README)
 spyglass_pro/
   app.py                   Flask routes + auth gate + scope boundary
   runner.py                job pool (queue cap, timeouts), engine dispatch

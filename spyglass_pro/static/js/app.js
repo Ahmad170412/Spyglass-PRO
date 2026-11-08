@@ -81,6 +81,16 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
+  /* CSP keeps script-src at 'self', so an inline onclick handler on a
+     result card is blocked before it can run. Copy is wired once here and
+     delegated through data-copy; result cards are re-rendered constantly,
+     so per-button listeners would leak with every scan. */
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    var btn = el && el.closest ? el.closest('[data-copy]') : null;
+    if (btn) copyResult(btn.getAttribute('data-copy'));
+  });
+
   /* ── Proxy status (topbar indicator; editing lives in Settings) ── */
   var proxyStatus = document.getElementById('proxyStatus');
 
@@ -812,7 +822,8 @@ function displayResults(containerId, data, append, qtype, target) {
     tabs += resultTab('Raw JSON', '<pre>' + escapeHtml(raw) + '</pre>');
     html += '<div class="result-tabs">' + tabs + '</div>';
     html += '<div class="export-btns">';
-    html += '<button class="btn btn-sm btn-outline" onclick="copyResult(\'' + containerId + '\')">Copy JSON</button>';
+    html += '<button class="btn btn-sm btn-outline" data-copy="' +
+            escapeHtml(containerId) + '">Copy JSON</button>';
     html += '</div></div>';
   }
 

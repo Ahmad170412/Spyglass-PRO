@@ -132,5 +132,21 @@ class StyleFloorTest(unittest.TestCase):
                          f"sub-10px text in style.css: {too_small}")
 
 
+class InlineHandlerTest(unittest.TestCase):
+    """No inline event handlers, in JS-built markup or the template.
+
+    The dashboard serves ``script-src 'self'``. A handler written as
+    ``onclick="..."`` is blocked before it runs — the Copy JSON button
+    shipped dead for exactly this reason — so every interaction is a
+    listener bound from app.js instead.
+    """
+
+    def test_no_inline_event_handlers(self):
+        for name in ("spyglass_pro/static/js/app.js", "spyglass_pro/templates/index.html"):
+            text = (_ROOT / name).read_text(encoding="utf-8")
+            found = re.findall(r"\son[a-z]+\s*=", text)
+            self.assertEqual(found, [], f"inline event handler in {name}: {found}")
+
+
 if __name__ == "__main__":
     unittest.main()
