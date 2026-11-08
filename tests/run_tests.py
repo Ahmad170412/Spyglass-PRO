@@ -18,6 +18,17 @@ import sys
 import unittest
 from pathlib import Path
 
+# Windows CI runs this with a cp1252 console. The frontend suite prints
+# arrows and middle dots ("newest → oldest", "24 Oct · 14:09"), so the
+# plain sys.stdout.write() below raised UnicodeEncodeError and failed the
+# job after every test had already passed. One reconfigure, before any
+# suite prints, makes the harness encoding-independent.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR))
 sys.path.insert(0, str(TESTS_DIR.parents[0] / "spyglass_pro" / "modules"))
