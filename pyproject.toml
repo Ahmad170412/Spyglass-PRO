@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spyglass-pro"
-version = "1.6.0"
+version = "1.6.2"
 description = "Spyglass-Pro — one passive OSINT dashboard for people, accounts and websites: identity resolution, light website recon and a local case store"
 readme = "README.md"
 # PEP 639: a single SPDX expression plus explicit license files, in place of

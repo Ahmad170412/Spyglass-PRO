@@ -5,6 +5,23 @@ the check counts quoted below are what the suite prints on a clean run.
 Versions are read from `spyglass_pro/version.py` / `pyproject.toml`; those two
 may not disagree (a pinning test fails if they do).
 
+## 1.6.2 — 2026-11-08
+
+**Copy JSON works under the dashboard's CSP, and the README shows 1.6.**
+
+- **Copy JSON was blocked by the dashboard's own CSP.** The result card
+  built its button with an inline `onclick`, which `script-src 'self'`
+  refuses before it runs, so the button was dead on every result. It is
+  now one delegated `data-copy` listener, and a UI-contract test fails if
+  an inline event handler reappears.
+- **The README now shows the current build.** The old hero screenshot
+  still advertised the removed IP module, Enrichment and three platforms;
+  it is replaced with current 1.6 captures of the tracked-target dashboard,
+  the person card, Targets and the Cases diff. The gallery is labelled as
+  fictional example data.
+
+`tests/run_tests.py` — **719 checks, 0 failed** (was 718).
+
 ## 1.6.0 — 2026-10-30
 
 **History moves to a vertical rail; Instagram checks keep their media.**

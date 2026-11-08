@@ -117,7 +117,7 @@ Copy-paste ready. No API keys, no accounts, no configuration.
 
 ```bash
 # From the GitHub release (no clone needed)
-pip install https://github.com/Ahmad170412/Spyglass-PRO/releases/download/v1.6.0/spyglass_pro-1.6.0-py3-none-any.whl
+pip install https://github.com/Ahmad170412/Spyglass-PRO/releases/download/v1.6.2/spyglass_pro-1.6.2-py3-none-any.whl
 spyglass-pro
 ```
 
