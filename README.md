@@ -59,6 +59,8 @@ a target, and how do I know the answer is real?**
 | --- | --- |
 | ![Stored cases — an entity diff between two website runs](https://raw.githubusercontent.com/Ahmad170412/Spyglass-PRO/main/docs/screenshots/stored-cases.png) | ![Targets — tracked handles and their check cadence](https://raw.githubusercontent.com/Ahmad170412/Spyglass-PRO/main/docs/screenshots/targets.png) |
 
+*Screenshots use fictional example data.*
+
 ---
 
 ## Table of Contents
