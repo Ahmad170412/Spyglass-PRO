@@ -174,6 +174,10 @@ class TargetsRouteTest(IsolatedHomeTest):
                                          query_string={"path": file_path})
                 self.assertEqual(served.status_code, 200)
                 self.assertEqual(served.data, b"jpeg-bytes")
+                # Windows keeps send_file's handle open until the response is
+                # closed; without this the TemporaryDirectory cleanup below
+                # dies with WinError 32 even though every assertion passed.
+                served.close()
 
                 missing = self.client.get("/api/social/media/%d" % tid)
                 self.assertEqual(missing.status_code, 400)
